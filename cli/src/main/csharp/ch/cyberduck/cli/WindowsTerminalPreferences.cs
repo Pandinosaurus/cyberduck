@@ -17,6 +17,7 @@
 //
 
 using ch.cyberduck.cli;
+using ch.cyberduck.core;
 using ch.cyberduck.core.cryptomator;
 using Ch.Cyberduck.Core;
 using Ch.Cyberduck.Core.Diagnostics;
@@ -81,6 +82,7 @@ namespace Ch.Cyberduck.Cli
             this.setDefault("factory.applicationfinder.class", typeof(ShellApplicationFinder).AssemblyQualifiedName);
             this.setDefault("factory.local.class", typeof(SystemLocal).AssemblyQualifiedName);
             this.setDefault("factory.passwordstore.class", typeof(PasswordStoreFacade).AssemblyQualifiedName);
+            this.setDefault("factory.passwordstoreprefixservice.class", typeof(CredentialManagerPasswordStorePrefixService).AssemblyQualifiedName);
             this.setDefault("factory.proxycredentialsstore.class",
                 typeof(CredentialManagerProxyCredentialsStore).AssemblyQualifiedName);
             this.setDefault("factory.proxy.class", typeof(SystemProxy).AssemblyQualifiedName);

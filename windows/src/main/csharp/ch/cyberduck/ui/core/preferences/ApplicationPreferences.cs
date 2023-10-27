@@ -16,6 +16,7 @@
 // feedback@cyberduck.io
 //
 
+using ch.cyberduck.core;
 using ch.cyberduck.core.bonjour;
 using ch.cyberduck.core.cryptomator;
 using ch.cyberduck.core.cryptomator.random;
@@ -72,6 +73,7 @@ namespace Ch.Cyberduck.Ui.Core.Preferences
             this.setDefault("factory.locale.class", typeof(DictionaryLocale).AssemblyQualifiedName);
             this.setDefault("factory.dateformatter.class", typeof(UserDefaultsDateFormatter).AssemblyQualifiedName);
             this.setDefault("factory.passwordstore.class", typeof(PasswordStoreFacade).AssemblyQualifiedName);
+            this.setDefault("factory.passwordstoreprefixservice.class", typeof(CredentialManagerPasswordStorePrefixService).AssemblyQualifiedName);
             this.setDefault("factory.proxycredentialsstore.class",
                 typeof(CredentialManagerProxyCredentialsStore).AssemblyQualifiedName);
             this.setDefault("factory.alertcallback.class", typeof(DialogAlertCallback).AssemblyQualifiedName);
