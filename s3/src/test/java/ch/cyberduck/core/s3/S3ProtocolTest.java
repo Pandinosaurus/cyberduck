@@ -26,7 +26,7 @@ public class S3ProtocolTest {
     @Test
     public void testConfigurable() {
         assertTrue(new S3Protocol().isHostnameConfigurable());
-        assertTrue(new S3Protocol().isPortConfigurable());
+        assertFalse(new S3Protocol().isPortConfigurable());
     }
 
     @Test
