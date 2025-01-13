@@ -22,8 +22,6 @@ import ch.cyberduck.core.features.Read;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.io.input.ProxyInputStream;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -35,11 +33,9 @@ import com.hierynomus.mssmb2.SMB2CreateDisposition;
 import com.hierynomus.mssmb2.SMB2CreateOptions;
 import com.hierynomus.mssmb2.SMB2ShareAccess;
 import com.hierynomus.smbj.common.SMBRuntimeException;
-import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
 
 public class SMBReadFeature implements Read {
-    private static final Logger logger = LogManager.getLogger(SMBReadFeature.class);
 
     private final SMBSession session;
 
@@ -49,9 +45,9 @@ public class SMBReadFeature implements Read {
 
     @Override
     public InputStream read(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
-        final DiskShare share = session.openShare(file);
+        final SMBSession.DiskShareWrapper share = session.openShare(file);
         try {
-            final File entry = share.openFile(new SMBPathContainerService(session).getKey(file),
+            final File entry = share.get().openFile(new SMBPathContainerService(session).getKey(file),
                     Collections.singleton(AccessMask.FILE_READ_DATA),
                     Collections.singleton(FileAttributes.FILE_ATTRIBUTE_NORMAL),
                     Collections.singleton(SMB2ShareAccess.FILE_SHARE_READ),
@@ -61,7 +57,7 @@ public class SMBReadFeature implements Read {
             if(status.isAppend()) {
                 stream.skip(status.getOffset());
             }
-            return new SMBInputStream(file, stream, share, entry);
+            return new SMBInputStream(file, stream, entry);
         }
         catch(SMBRuntimeException e) {
             throw new SMBExceptionMappingService().map("Download {0} failed", e, file);
@@ -69,40 +65,55 @@ public class SMBReadFeature implements Read {
         catch(IOException e) {
             throw new SMBTransportExceptionMappingService().map("Download {0} failed", e, file);
         }
+        finally {
+            session.releaseShare(share);
+        }
     }
 
     private final class SMBInputStream extends ProxyInputStream {
         private final Path file;
-        private final DiskShare share;
         private final File handle;
 
-        public SMBInputStream(final Path file, final InputStream stream, final DiskShare share, final File handle) {
+        private SMBSession.DiskShareWrapper share;
+
+        public SMBInputStream(final Path file, final InputStream stream, final File handle) {
             super(stream);
             this.file = file;
-            this.share = share;
             this.handle = handle;
+        }
+
+        @Override
+        protected void beforeRead(final int n) throws IOException {
+            try {
+                share = session.openShare(file);
+            }
+            catch(BackgroundException e) {
+                throw new IOException(e);
+            }
+        }
+
+        @Override
+        protected void afterRead(final int n) throws IOException {
+            try {
+                session.releaseShare(share);
+            }
+            catch(BackgroundException e) {
+                throw new IOException(e);
+            }
         }
 
         @Override
         public void close() throws IOException {
             try {
                 try {
-                    try {
-                        super.close();
-                    }
-                    finally {
-                        handle.close();
-                    }
+                    super.close();
                 }
                 finally {
-                    share.close();
+                    handle.close();
                 }
             }
             catch(SMBRuntimeException e) {
                 throw new IOException(e);
-            }
-            finally {
-                session.releaseShare(file);
             }
         }
     }

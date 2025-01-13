@@ -25,7 +25,6 @@ import ch.cyberduck.core.azure.AzureDeleteFeature;
 import ch.cyberduck.core.azure.AzureFindFeature;
 import ch.cyberduck.core.azure.AzureTouchFeature;
 import ch.cyberduck.core.azure.AzureWriteFeature;
-import ch.cyberduck.core.cryptomator.features.CryptoFindV6Feature;
 import ch.cyberduck.core.cryptomator.features.CryptoTouchFeature;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Find;
@@ -62,9 +61,9 @@ public class AzureTouchFeatureTest extends AbstractAzureTest {
         final TransferStatus status = new TransferStatus();
         final Path test = new CryptoTouchFeature<>(session, new AzureTouchFeature(session, null), new AzureWriteFeature(session, null), cryptomator).touch(
                 new Path(vault, new AlphanumericRandomStringService(130).random(), EnumSet.of(Path.Type.file)), status);
-        assertEquals(0L, test.attributes().getSize());
+        assertEquals(TransferStatus.UNKNOWN_LENGTH, test.attributes().getSize());
         assertEquals(TransferStatus.UNKNOWN_LENGTH, status.getResponse().getSize());
-        assertTrue(new CryptoFindV6Feature(session, new AzureFindFeature(session, null), cryptomator).find(test));
+        assertTrue(cryptomator.getFeature(session, Find.class, new AzureFindFeature(session, null)).find(test));
         cryptomator.getFeature(session, Delete.class, new AzureDeleteFeature(session, null)).delete(Arrays.asList(test, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
     }
 
@@ -79,7 +78,7 @@ public class AzureTouchFeatureTest extends AbstractAzureTest {
         final TransferStatus status = new TransferStatus();
         final Path test = new CryptoTouchFeature<>(session, new AzureTouchFeature(session, null), new AzureWriteFeature(session, null), cryptomator).touch(
                 new Path(vault, new AlphanumericRandomStringService(130).random(), EnumSet.of(Path.Type.file)), status);
-        assertEquals(0L, test.attributes().getSize());
+        assertEquals(TransferStatus.UNKNOWN_LENGTH, test.attributes().getSize());
         assertEquals(TransferStatus.UNKNOWN_LENGTH, status.getResponse().getSize());
         assertTrue(cryptomator.getFeature(session, Find.class, new DefaultFindFeature(session)).find(test));
         cryptomator.getFeature(session, Delete.class, new AzureDeleteFeature(session, null)).delete(Arrays.asList(test, vault), new DisabledLoginCallback(), new Delete.DisabledCallback());
