@@ -36,12 +36,12 @@ import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.io.output.ProxyOutputStream;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
 import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.BufferedHttpEntity;
 import org.apache.http.util.EntityUtils;
 import org.apache.logging.log4j.LogManager;
@@ -76,7 +76,7 @@ public class BrickWriteFeature extends AbstractHttpWriteFeature<FileEntity> {
         }
         final HttpResponseOutputStream<FileEntity> stream = this.write(file, status, new DelayedHttpEntityCallable<FileEntity>(file) {
             @Override
-            public FileEntity call(final AbstractHttpEntity entity) throws BackgroundException {
+            public FileEntity call(final HttpEntity entity) throws BackgroundException {
                 try {
                     final HttpPut request = new HttpPut(uploadUri);
                     request.setEntity(entity);
@@ -86,30 +86,31 @@ public class BrickWriteFeature extends AbstractHttpWriteFeature<FileEntity> {
                     try {
                         switch(response.getStatusLine().getStatusCode()) {
                             case HttpStatus.SC_OK:
+                                log.info("Received response {} for part number {}", response, status.getPart());
                                 // Upload complete
                                 if(response.containsHeader("ETag")) {
-                                    if(log.isInfoEnabled()) {
-                                        log.info(String.format("Received response %s for part number %d", response, status.getPart()));
+                                    if(file.getType().contains(Path.Type.encrypted)) {
+                                        log.warn("Skip checksum verification for {} with client side encryption enabled", file);
                                     }
-                                    if(HashAlgorithm.md5.equals(status.getChecksum().algorithm)) {
-                                        final Checksum etag = Checksum.parse(StringUtils.remove(response.getFirstHeader("ETag").getValue(), '"'));
-                                        if(!status.getChecksum().equals(etag)) {
-                                            throw new ChecksumException(MessageFormat.format(LocaleFactory.localizedString("Upload {0} failed", "Error"), file.getName()),
-                                                    MessageFormat.format("Mismatch between {0} hash {1} of uploaded data and ETag {2} returned by the server",
-                                                            etag.algorithm.toString(), status.getChecksum().hash, etag.hash));
+                                    else {
+                                        if(HashAlgorithm.md5.equals(status.getChecksum().algorithm)) {
+                                            final Checksum etag = Checksum.parse(StringUtils.remove(response.getFirstHeader("ETag").getValue(), '"'));
+                                            if(!status.getChecksum().equals(etag)) {
+                                                throw new ChecksumException(MessageFormat.format(LocaleFactory.localizedString("Upload {0} failed", "Error"), file.getName()),
+                                                        MessageFormat.format("Mismatch between {0} hash {1} of uploaded data and ETag {2} returned by the server",
+                                                                etag.algorithm.toString(), status.getChecksum().hash, etag.hash));
+                                            }
                                         }
                                     }
                                 }
                                 else {
-                                    if(log.isDebugEnabled()) {
-                                        log.debug("No ETag header in response available");
-                                    }
+                                    log.debug("No ETag header in response available");
                                 }
                                 return null;
                             default:
                                 EntityUtils.updateEntity(response, new BufferedHttpEntity(response.getEntity()));
-                                throw new DefaultHttpResponseExceptionMappingService().map(
-                                        new HttpResponseException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()));
+                                throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
+                                        new HttpResponseException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase()), file);
                         }
                     }
                     finally {
@@ -117,10 +118,10 @@ public class BrickWriteFeature extends AbstractHttpWriteFeature<FileEntity> {
                     }
                 }
                 catch(HttpResponseException e) {
-                    throw new DefaultHttpResponseExceptionMappingService().map(e);
+                    throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed", e, file);
                 }
                 catch(IOException e) {
-                    throw new DefaultIOExceptionMappingService().map(e);
+                    throw new DefaultIOExceptionMappingService().map("Upload {0} failed", e, file);
                 }
             }
 
@@ -143,7 +144,7 @@ public class BrickWriteFeature extends AbstractHttpWriteFeature<FileEntity> {
                 @Override
                 public void close() throws IOException {
                     if(close.get()) {
-                        log.warn(String.format("Skip double close of stream %s", this));
+                        log.warn("Skip double close of stream {}", this);
                         return;
                     }
                     super.close();
@@ -170,11 +171,6 @@ public class BrickWriteFeature extends AbstractHttpWriteFeature<FileEntity> {
 
     @Override
     public EnumSet<Flags> features(final Path file) {
-        return EnumSet.of(Flags.timestamp);
-    }
-
-    @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
+        return EnumSet.of(Flags.timestamp, Flags.checksum);
     }
 }

@@ -25,7 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-public interface Protocol extends Comparable<Protocol>, Serializable {
+public interface Protocol extends FeatureFactory, Comparable<Protocol>, Serializable {
 
     /**
      * Check login credentials for validity for this protocol.
@@ -234,6 +234,8 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
      */
     String getHostnamePlaceholder();
 
+    String getPathPlaceholder();
+
     /**
      * @return Username label
      */
@@ -315,7 +317,9 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
         eue,
         freenet,
         ctera,
-        box
+        box,
+        deepbox,
+        none
     }
 
     enum Case {
@@ -361,5 +365,6 @@ public interface Protocol extends Comparable<Protocol>, Serializable {
     }
 
     @SuppressWarnings("unchecked")
+    @Override
     <T> T getFeature(final Class<T> type);
 }

@@ -32,6 +32,7 @@ import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -40,7 +41,6 @@ import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.protocol.HTTP;
@@ -66,14 +66,14 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
     public GoogleStorageWriteFeature(final GoogleStorageSession session) {
         super(new GoogleStorageAttributesFinderFeature(session));
         this.session = session;
-        this.containerService = session.getFeature(PathContainerService.class);
+        this.containerService = new GoogleStoragePathContainerService();
     }
 
     @Override
     public HttpResponseOutputStream<StorageObject> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final DelayedHttpEntityCallable<StorageObject> command = new DelayedHttpEntityCallable<StorageObject>(file) {
             @Override
-            public StorageObject call(final AbstractHttpEntity entity) throws BackgroundException {
+            public StorageObject call(final HttpEntity entity) throws BackgroundException {
                 try {
                     // POST /upload/storage/v1/b/myBucket/o
                     final StringBuilder uri = new StringBuilder(String.format("%supload/storage/v1/b/%s/o?uploadType=resumable",
@@ -143,9 +143,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                             case HttpStatus.SC_OK:
                                 break;
                             default:
-                                throw new DefaultHttpResponseExceptionMappingService().map(
+                                throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
                                         new HttpResponseException(response.getStatusLine().getStatusCode(),
-                                                new GoogleStorageExceptionMappingService().parse(response)));
+                                                GoogleStorageExceptionMappingService.parse(response)), file);
                         }
                     }
                     finally {
@@ -164,9 +164,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                                     return session.getClient().getObjectParser().parseAndClose(new InputStreamReader(
                                             putResponse.getEntity().getContent(), StandardCharsets.UTF_8), StorageObject.class);
                                 default:
-                                    throw new DefaultHttpResponseExceptionMappingService().map(
+                                    throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
                                             new HttpResponseException(putResponse.getStatusLine().getStatusCode(),
-                                                    new GoogleStorageExceptionMappingService().parse(putResponse)));
+                                                    GoogleStorageExceptionMappingService.parse(putResponse)), file);
                             }
                         }
                         finally {
@@ -174,9 +174,9 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
                         }
                     }
                     else {
-                        throw new DefaultHttpResponseExceptionMappingService().map(
+                        throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
                                 new HttpResponseException(response.getStatusLine().getStatusCode(),
-                                        new GoogleStorageExceptionMappingService().parse(response)));
+                                        GoogleStorageExceptionMappingService.parse(response)), file);
                     }
                 }
                 catch(IOException e) {
@@ -193,13 +193,8 @@ public class GoogleStorageWriteFeature extends AbstractHttpWriteFeature<StorageO
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
     public EnumSet<Flags> features(final Path file) {
-        return EnumSet.of(Flags.timestamp);
+        return EnumSet.of(Flags.timestamp, Flags.acl, Flags.mime);
     }
 
     @Override

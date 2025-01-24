@@ -29,6 +29,7 @@ import ch.cyberduck.core.sftp.openssh.OpenSSHCredentialsConfigurator;
 import ch.cyberduck.core.sftp.openssh.OpenSSHIdentitiesOnlyConfigurator;
 import ch.cyberduck.core.threading.CancelCallback;
 
+import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.logging.log4j.LogManager;
@@ -48,7 +49,6 @@ import com.jcraft.jsch.agentproxy.CustomIdentity;
 import com.jcraft.jsch.agentproxy.Identity;
 import com.jcraft.jsch.agentproxy.sshj.AuthAgent;
 import net.schmizz.sshj.SSHClient;
-import net.schmizz.sshj.common.Base64;
 import net.schmizz.sshj.common.Buffer;
 import net.schmizz.sshj.transport.TransportException;
 import net.schmizz.sshj.userauth.UserAuthException;
@@ -68,11 +68,9 @@ public class SFTPAgentAuthentication implements AuthenticationProvider<Boolean> 
 
     @Override
     public Boolean authenticate(final Host bookmark, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Login using agent %s for %s", agent, bookmark));
-        }
+        log.debug("Login using agent {} for {}", agent, bookmark);
         if(agent.getIdentities().isEmpty()) {
-            log.warn(String.format("Skip authentication with agent %s with no identity available", agent));
+            log.warn("Skip authentication with agent {} with no identity available", agent);
             return false;
         }
         final Collection<Identity> identities;
@@ -80,20 +78,25 @@ public class SFTPAgentAuthentication implements AuthenticationProvider<Boolean> 
             final Credentials configuration = new OpenSSHCredentialsConfigurator().configure(bookmark);
             if(configuration.isPublicKeyAuthentication()) {
                 try {
-                    final Local identity = configuration.getIdentity();
-                    if(log.isWarnEnabled()) {
-                        log.warn(String.format("Only read specific key %s from SSH agent with IdentitiesOnly configuration", identity));
+                    final Local setting = configuration.getIdentity();
+                    log.warn("Only read specific key {} from SSH agent with IdentitiesOnly configuration", setting);
+                    final Identity identity = isPrivateKey(setting) ?
+                            identityFromPrivateKey(setting) :
+                            identityFromPublicKey(setting);
+                    if(identity != null) {
+                        identities = Collections.singleton(identity);
                     }
-                    identities = this.isPrivateKey(identity) ?
-                            this.identityFromPrivateKey(identity) :
-                            this.identityFromPublicKey(identity);
+                    else {
+                        log.warn("Missing public key for {}", setting);
+                        identities = Collections.emptyList();
+                    }
                 }
                 catch(IOException e) {
                     throw new DefaultIOExceptionMappingService().map(e);
                 }
             }
             else {
-                log.warn(String.format("Missing IdentityFile configuration for %s", bookmark));
+                log.warn("Missing IdentityFile configuration for {}", bookmark);
                 identities = Collections.emptyList();
             }
         }
@@ -132,9 +135,7 @@ public class SFTPAgentAuthentication implements AuthenticationProvider<Boolean> 
                 if(identity.getComment() != null) {
                     final String candidate = new String(identity.getComment(), StandardCharsets.UTF_8);
                     if(selected.getAbsolute().equals(candidate)) {
-                        if(log.isDebugEnabled()) {
-                            log.debug(String.format("Matching identity %s found", candidate));
-                        }
+                        log.debug("Matching identity {} found", candidate);
                         return Collections.singletonList(identity);
                     }
                 }
@@ -143,32 +144,33 @@ public class SFTPAgentAuthentication implements AuthenticationProvider<Boolean> 
         return identities;
     }
 
-    private boolean isPrivateKey(final Local identity) throws AccessDeniedException, IOException {
+    static boolean isPrivateKey(final Local identity) throws AccessDeniedException, IOException {
         final KeyFormat format = KeyProviderUtil.detectKeyFileFormat(
                 new InputStreamReader(identity.getInputStream()), true);
         return format != KeyFormat.Unknown;
     }
 
-    private Collection<Identity> identityFromPrivateKey(final Local identity) throws IOException, AccessDeniedException {
+    static Identity identityFromPrivateKey(final Local identity) throws IOException, AccessDeniedException {
         final File pubKey = OpenSSHKeyFileUtil.getPublicKeyFile(new File(identity.getAbsolute()));
         if(pubKey != null) {
-            return this.identityFromPublicKey(LocalFactory.get(pubKey.getAbsolutePath()));
+            return identityFromPublicKey(LocalFactory.get(pubKey.getAbsolutePath()));
         }
-        log.warn(String.format("Unable to find public key file for identity %s", identity));
-        return Collections.emptyList();
+        log.warn("Unable to find public key file for identity {}", identity);
+        return null;
     }
 
-    private Collection<Identity> identityFromPublicKey(final Local identity) throws IOException, AccessDeniedException {
+    static Identity identityFromPublicKey(final Local identity) throws IOException, AccessDeniedException {
         final List<String> lines = IOUtils.readLines(identity.getInputStream(), Charset.defaultCharset());
         for(String line : lines) {
             final String keydata = line.trim();
             if(StringUtils.isNotBlank(keydata)) {
                 String[] parts = keydata.split("\\s+");
                 if(parts.length >= 2) {
-                    return Collections.singletonList(new CustomIdentity(Base64.decode(parts[1])));
+                    return new CustomIdentity(Base64.decodeBase64(parts[1]));
                 }
             }
         }
-        throw new IOException(String.format("Failure reading public key %s", identity));
+        log.warn("Failure reading public key {}", identity);
+        return null;
     }
 }

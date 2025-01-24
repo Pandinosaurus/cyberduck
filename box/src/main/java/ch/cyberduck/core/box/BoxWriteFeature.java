@@ -39,7 +39,6 @@ import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.client.HttpResponseException;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.mime.MultipartEntityBuilder;
 import org.apache.http.message.BasicHeader;
@@ -70,7 +69,7 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
     public HttpResponseOutputStream<File> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final DelayedHttpEntityCallable<File> command = new DelayedHttpEntityCallable<File>(file) {
             @Override
-            public File call(final AbstractHttpEntity entity) throws BackgroundException {
+            public File call(final HttpEntity entity) throws BackgroundException {
                 try {
                     final HttpPost request;
                     if(status.isExists()) {
@@ -108,7 +107,7 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
                             request.addHeader(new BasicHeader(HttpHeaders.IF_MATCH, status.getRemote().getETag()));
                         }
                         else {
-                            log.warn(String.format("Missing remote attributes in transfer status to read current ETag for %s", file));
+                            log.warn("Missing remote attributes in transfer status to read current ETag for {}", file);
                         }
                     }
                     final Files files = session.getClient().execute(request, new BoxClientErrorResponseHandler<Files>() {
@@ -117,16 +116,14 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
                             return new JSON().getContext(null).readValue(entity.getContent(), Files.class);
                         }
                     });
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Received response %s for upload of %s", files, file));
-                    }
+                    log.debug("Received response {} for upload of {}", files, file);
                     if(files.getEntries().stream().findFirst().isPresent()) {
                         return files.getEntries().stream().findFirst().get();
                     }
                     throw new NotfoundException(file.getAbsolute());
                 }
                 catch(HttpResponseException e) {
-                    throw new DefaultHttpResponseExceptionMappingService().map(e);
+                    throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed", e, file);
                 }
                 catch(IOException e) {
                     throw new DefaultIOExceptionMappingService().map("Upload {0} failed", e, file);
@@ -147,12 +144,7 @@ public class BoxWriteFeature extends AbstractHttpWriteFeature<File> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
     public EnumSet<Flags> features(final Path file) {
-        return EnumSet.of(Flags.timestamp);
+        return EnumSet.of(Flags.timestamp, Flags.checksum, Flags.mime);
     }
 }

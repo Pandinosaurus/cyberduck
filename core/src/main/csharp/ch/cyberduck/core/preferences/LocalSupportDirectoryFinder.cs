@@ -33,13 +33,18 @@ namespace Ch.Cyberduck.Core.Preferences
         {
             get
             {
-                return local ??= new(Path.Combine(EnvironmentInfo.LocalAppDataPath, Runtime.DataFolderName));
+                return local ??= new(Path.Combine(EnvironmentInfo.LocalAppDataPath, EnvironmentInfo.DataFolderName));
             }
         }
 
         public Local find()
         {
             return new SystemLocal(Local);
+        }
+
+        public SupportDirectoryFinder setup()
+        {
+            return this;
         }
     }
 }

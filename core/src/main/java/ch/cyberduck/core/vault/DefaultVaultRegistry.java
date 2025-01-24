@@ -17,8 +17,6 @@ package ch.cyberduck.core.vault;
 
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.PasswordCallback;
-import ch.cyberduck.core.PasswordStore;
-import ch.cyberduck.core.PasswordStoreFactory;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.SimplePathPredicate;
@@ -45,21 +43,14 @@ public class DefaultVaultRegistry extends CopyOnWriteArraySet<Vault> implements 
     public static final String DEFAULT_VAULTCONFIG_FILE_NAME =
         PreferencesFactory.get().getProperty("cryptomator.vault.config.filename");
 
-    private final PasswordStore keychain;
     private final PasswordCallback prompt;
 
     public DefaultVaultRegistry(final PasswordCallback prompt) {
-        this(PasswordStoreFactory.get(), prompt);
-    }
-
-    public DefaultVaultRegistry(final PasswordStore keychain, final PasswordCallback prompt) {
-        this.keychain = keychain;
         this.prompt = prompt;
     }
 
-    public DefaultVaultRegistry(final PasswordStore keychain, final PasswordCallback prompt, final Vault... vaults) {
+    public DefaultVaultRegistry(final PasswordCallback prompt, final Vault... vaults) {
         super(Arrays.asList(vaults));
-        this.keychain = keychain;
         this.prompt = prompt;
     }
 
@@ -95,9 +86,7 @@ public class DefaultVaultRegistry extends CopyOnWriteArraySet<Vault> implements 
 
     @Override
     public void clear() {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Close %d registered vaults", this.size()));
-        }
+        log.info("Close {} registered vaults", this.size());
         this.forEach(Vault::close);
         super.clear();
     }
@@ -106,9 +95,7 @@ public class DefaultVaultRegistry extends CopyOnWriteArraySet<Vault> implements 
     public Vault find(final Session session, final Path file, final boolean unlock) throws VaultUnlockCancelException {
         for(Vault vault : this) {
             if(vault.contains(file)) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Found vault %s for file %s", vault, file));
-                }
+                log.debug("Found vault {} for file {}", vault, file);
                 return vault;
             }
         }
@@ -144,15 +131,11 @@ public class DefaultVaultRegistry extends CopyOnWriteArraySet<Vault> implements 
     protected <T> T _getFeature(final Session<?> session, final Class<T> type, final T proxy) {
         if(type == ListService.class) {
             return (T) new VaultRegistryListService(session, (ListService) proxy, this,
-                    new LoadingVaultLookupListener(this, prompt))
-                    .withAutodetect(new HostPreferences(session.getHost()).getBoolean("cryptomator.vault.autodetect")
-                    );
+                    new LoadingVaultLookupListener(this, prompt));
         }
         if(type == Find.class) {
             return (T) new VaultRegistryFindFeature(session, (Find) proxy, this,
-                    new LoadingVaultLookupListener(this, prompt))
-                    .withAutodetect(new HostPreferences(session.getHost()).getBoolean("cryptomator.vault.autodetect")
-                    );
+                    new LoadingVaultLookupListener(this, prompt));
         }
         if(type == Bulk.class) {
             return (T) new VaultRegistryBulkFeature(session, (Bulk) proxy, this);

@@ -22,13 +22,11 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.AttributesAdapter;
 import ch.cyberduck.core.features.AttributesFinder;
-
-import java.io.IOException;
+import ch.cyberduck.core.features.Quota;
 
 import com.hierynomus.msfscc.fileinformation.FileAllInformation;
 import com.hierynomus.msfscc.fileinformation.ShareInfo;
 import com.hierynomus.smbj.common.SMBRuntimeException;
-import com.hierynomus.smbj.share.DiskShare;
 
 public class SMBAttributesFinderFeature implements AttributesFinder, AttributesAdapter<FileAllInformation> {
 
@@ -43,16 +41,18 @@ public class SMBAttributesFinderFeature implements AttributesFinder, AttributesA
         if(file.isRoot()) {
             return PathAttributes.EMPTY;
         }
-        try (final DiskShare share = session.openShare(file)) {
+        final SMBSession.DiskShareWrapper share = session.openShare(file);
+        try {
             if(new SMBPathContainerService(session).isContainer(file)) {
-                final ShareInfo shareInformation = share.getShareInformation();
+                final ShareInfo shareInformation = share.get().getShareInformation();
                 final PathAttributes attributes = new PathAttributes();
-                attributes.setSize(shareInformation.getTotalSpace() - shareInformation.getFreeSpace());
-                attributes.setQuota(shareInformation.getTotalSpace());
+                final long used = shareInformation.getTotalSpace() - shareInformation.getFreeSpace();
+                attributes.setSize(used);
+                attributes.setQuota(new Quota.Space(used, shareInformation.getFreeSpace()));
                 return attributes;
             }
             else {
-                final FileAllInformation fileInformation = share.getFileInformation(new SMBPathContainerService(session).getKey(file));
+                final FileAllInformation fileInformation = share.get().getFileInformation(new SMBPathContainerService(session).getKey(file));
                 if(file.isDirectory() && !fileInformation.getStandardInformation().isDirectory()) {
                     throw new NotfoundException(String.format("File %s found but type is not directory", file.getName()));
                 }
@@ -65,11 +65,8 @@ public class SMBAttributesFinderFeature implements AttributesFinder, AttributesA
         catch(SMBRuntimeException e) {
             throw new SMBExceptionMappingService().map("Failure to read attributes of {0}", e, file);
         }
-        catch(IOException e) {
-            throw new SMBTransportExceptionMappingService().map("Cannot read container configuration", e);
-        }
         finally {
-            session.releaseShare(file);
+            session.releaseShare(share);
         }
     }
 
