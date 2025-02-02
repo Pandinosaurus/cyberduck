@@ -17,10 +17,9 @@ package ch.cyberduck.core.smb;
 
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.shared.DefaultTimestampFeature;
+import ch.cyberduck.core.features.Timestamp;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import java.io.IOException;
 import java.util.Collections;
 
 import com.hierynomus.msdtyp.AccessMask;
@@ -32,10 +31,9 @@ import com.hierynomus.mssmb2.SMB2CreateOptions;
 import com.hierynomus.mssmb2.SMB2ShareAccess;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.share.Directory;
-import com.hierynomus.smbj.share.DiskShare;
 import com.hierynomus.smbj.share.File;
 
-public class SMBTimestampFeature extends DefaultTimestampFeature {
+public class SMBTimestampFeature implements Timestamp {
 
     private final SMBSession session;
 
@@ -45,9 +43,10 @@ public class SMBTimestampFeature extends DefaultTimestampFeature {
 
     @Override
     public void setTimestamp(final Path file, final TransferStatus status) throws BackgroundException {
-        try (final DiskShare share = session.openShare(file)) {
+        final SMBSession.DiskShareWrapper share = session.openShare(file);
+        try {
             if(file.isDirectory()) {
-                try (final Directory entry = share.openDirectory(new SMBPathContainerService(session).getKey(file),
+                try (final Directory entry = share.get().openDirectory(new SMBPathContainerService(session).getKey(file),
                         Collections.singleton(AccessMask.FILE_WRITE_ATTRIBUTES),
                         Collections.singleton(FileAttributes.FILE_ATTRIBUTE_DIRECTORY),
                         Collections.singleton(SMB2ShareAccess.FILE_SHARE_READ),
@@ -63,11 +62,11 @@ public class SMBTimestampFeature extends DefaultTimestampFeature {
                 }
             }
             else {
-                try (final File entry = share.openFile(new SMBPathContainerService(session).getKey(file),
+                try (final File entry = share.get().openFile(new SMBPathContainerService(session).getKey(file),
                         Collections.singleton(AccessMask.FILE_WRITE_ATTRIBUTES),
                         Collections.singleton(FileAttributes.FILE_ATTRIBUTE_NORMAL),
                         Collections.singleton(SMB2ShareAccess.FILE_SHARE_READ),
-                        SMB2CreateDisposition.FILE_OVERWRITE,
+                        SMB2CreateDisposition.FILE_OPEN,
                         Collections.singleton(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE))) {
                     final FileBasicInformation updatedBasicInformation = new FileBasicInformation(
                             status.getCreated() != null ? FileTime.ofEpochMillis(status.getCreated()) : FileBasicInformation.DONT_SET,
@@ -79,14 +78,11 @@ public class SMBTimestampFeature extends DefaultTimestampFeature {
                 }
             }
         }
-        catch(IOException e) {
-            throw new SMBTransportExceptionMappingService().map("Cannot read container configuration", e);
-        }
         catch(SMBRuntimeException e) {
             throw new SMBExceptionMappingService().map("Cannot change timestamp of {0}", e, file);
         }
         finally {
-            session.releaseShare(file);
+            session.releaseShare(share);
         }
     }
 }

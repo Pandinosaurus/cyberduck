@@ -62,12 +62,12 @@ public class ProfileDictionary<T> {
      */
     public Profile deserialize(final T serialized, final Predicate<Protocol> filter) {
         final Deserializer<T> dict = deserializer.create(serialized);
-        final String protocol = dict.stringForKey("Protocol");
+        final String protocol = dict.stringForKey(Profile.PROTOCOL_KEY);
         if(StringUtils.isNotBlank(protocol)) {
             // Return default registered protocol specification as parent
             Protocol parent = protocols.forName(protocols.find(filter), protocol, null);
             if(null == parent) {
-                log.error(String.format("Unknown protocol %s in profile. Try fallback with no predicate in lookup", protocol));
+                log.error("Unknown protocol {} in profile. Try fallback with no predicate in lookup", protocol);
                 parent = protocols.forName(protocols.find(p -> true), protocol, null);
             }
             if(null == parent) {

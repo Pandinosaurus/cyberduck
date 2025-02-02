@@ -19,53 +19,41 @@ package ch.cyberduck.core.s3;
  * dkocher@cyberduck.ch
  */
 
-import ch.cyberduck.core.AttributedList;
-import ch.cyberduck.core.Credentials;
-import ch.cyberduck.core.Host;
-import ch.cyberduck.core.HostKeyCallback;
-import ch.cyberduck.core.ListProgressListener;
-import ch.cyberduck.core.ListService;
-import ch.cyberduck.core.LoginCallback;
-import ch.cyberduck.core.Path;
-import ch.cyberduck.core.PathAttributes;
-import ch.cyberduck.core.PathContainerService;
-import ch.cyberduck.core.Scheme;
-import ch.cyberduck.core.UrlProvider;
+import ch.cyberduck.core.*;
+import ch.cyberduck.core.auth.AWSCredentialsConfigurator;
 import ch.cyberduck.core.auth.AWSSessionCredentialsRetriever;
+import ch.cyberduck.core.aws.CustomClientConfiguration;
 import ch.cyberduck.core.cdn.Distribution;
 import ch.cyberduck.core.cdn.DistributionConfiguration;
 import ch.cyberduck.core.cloudfront.CloudFrontDistributionConfigurationPreloader;
 import ch.cyberduck.core.cloudfront.WebsiteCloudFrontDistributionConfiguration;
-import ch.cyberduck.core.date.RFC822DateFormatter;
-import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.features.*;
+import ch.cyberduck.core.http.CustomServiceUnavailableRetryStrategy;
+import ch.cyberduck.core.http.ExecutionCountServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.HttpSession;
 import ch.cyberduck.core.kms.KMSEncryptionFeature;
 import ch.cyberduck.core.oauth.OAuth2AuthorizationService;
 import ch.cyberduck.core.oauth.OAuth2RequestInterceptor;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesReader;
-import ch.cyberduck.core.proxy.Proxy;
-import ch.cyberduck.core.proxy.ProxyFactory;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.restore.Glacier;
-import ch.cyberduck.core.shared.DefaultHomeFinderService;
 import ch.cyberduck.core.shared.DefaultPathHomeFeature;
 import ch.cyberduck.core.shared.DelegatingHomeFeature;
-import ch.cyberduck.core.shared.DelegatingSchedulerFeature;
 import ch.cyberduck.core.shared.DisabledBulkFeature;
-import ch.cyberduck.core.ssl.DefaultX509KeyManager;
-import ch.cyberduck.core.ssl.DisabledX509TrustManager;
-import ch.cyberduck.core.ssl.ThreadLocalHostnameDelegatingTrustManager;
-import ch.cyberduck.core.ssl.X509KeyManager;
-import ch.cyberduck.core.ssl.X509TrustManager;
+import ch.cyberduck.core.ssl.*;
 import ch.cyberduck.core.sts.STSAssumeRoleCredentialsRequestInterceptor;
-import ch.cyberduck.core.threading.BackgroundExceptionCallable;
+import ch.cyberduck.core.sts.STSExceptionMappingService;
 import ch.cyberduck.core.threading.CancelCallback;
-import ch.cyberduck.core.transfer.TransferStatus;
-
+import com.amazonaws.client.builder.AwsClientBuilder;
+import com.amazonaws.services.securitytoken.AWSSecurityTokenService;
+import com.amazonaws.services.securitytoken.AWSSecurityTokenServiceClientBuilder;
+import com.amazonaws.services.securitytoken.model.AWSSecurityTokenServiceException;
+import com.amazonaws.services.securitytoken.model.GetCallerIdentityRequest;
+import com.amazonaws.services.securitytoken.model.GetCallerIdentityResult;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpRequest;
@@ -82,7 +70,6 @@ import org.apache.logging.log4j.Logger;
 import org.jets3t.service.ServiceException;
 import org.jets3t.service.impl.rest.XmlResponsesSaxParser;
 import org.jets3t.service.impl.rest.httpclient.RegionEndpointCache;
-import org.jets3t.service.model.StorageObject;
 import org.jets3t.service.security.AWSCredentials;
 import org.jets3t.service.security.AWSSessionCredentials;
 import org.jets3t.service.security.ProviderCredentials;
@@ -118,9 +105,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
         @Override
         public Distribution read(final Path container, final Distribution.Method method, final LoginCallback prompt) throws BackgroundException {
             final Distribution distribution = super.read(container, method, prompt);
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Cache distribution %s", distribution));
-            }
+            log.debug("Cache distribution {}", distribution);
             // Replace previously cached value
             final Set<Distribution> cached = distributions.getOrDefault(container, new HashSet<>());
             cached.add(distribution);
@@ -130,6 +115,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
     };
 
     private final Map<Path, Set<Distribution>> distributions = new ConcurrentHashMap<>();
+    private final CloudFrontDistributionConfigurationPreloader scheduler = new CloudFrontDistributionConfigurationPreloader(this);
 
     private S3CredentialsStrategy authentication;
 
@@ -147,6 +133,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
     @Override
     protected void logout() throws BackgroundException {
         try {
+            scheduler.shutdown(false);
             client.shutdown();
         }
         catch(ServiceException e) {
@@ -184,14 +171,12 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
     }
 
     @Override
-    protected RequestEntityRestStorageService connect(final Proxy proxy, final HostKeyCallback hostkey, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    protected RequestEntityRestStorageService connect(final ProxyFinder proxy, final HostKeyCallback hostkey, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
-        authentication = this.configureCredentialsStrategy(configuration, prompt);
+        authentication = this.configureCredentialsStrategy(proxy, configuration, prompt);
         if(preferences.getBoolean("s3.upload.expect-continue")) {
             final String header = HTTP.EXPECT_DIRECTIVE;
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Add request handler for %s", header));
-            }
+            log.debug("Add request handler for {}", header);
             configuration.addInterceptorLast(new HttpRequestInterceptor() {
                 @Override
                 public void process(final HttpRequest request, final HttpContext context) {
@@ -206,9 +191,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             // Only for AWS
             if(S3Session.isAwsHostname(host.getHostname())) {
                 final String header = REQUESTER_PAYS_HEADER;
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Add request handler for %s", header));
-                }
+                log.debug("Add request handler for {}", header);
                 configuration.addInterceptorLast(new HttpRequestInterceptor() {
                     @Override
                     public void process(final HttpRequest request, final HttpContext context) {
@@ -237,8 +220,6 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             }
         });
         configuration.addInterceptorLast(new HttpRequestInterceptor() {
-            private final RFC822DateFormatter formatter = new RFC822DateFormatter();
-
             @Override
             public void process(final HttpRequest request, final HttpContext context) {
                 request.setHeader(S3_ALTERNATE_DATE, SignatureUtils.formatAwsFlavouredISO8601Date(client.getCurrentTimeWithOffset()));
@@ -266,11 +247,10 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
         return client;
     }
 
-    protected S3CredentialsStrategy configureCredentialsStrategy(final HttpClientBuilder configuration,
+    protected S3CredentialsStrategy configureCredentialsStrategy(final ProxyFinder proxy, final HttpClientBuilder configuration,
                                                                  final LoginCallback prompt) throws LoginCanceledException {
         if(host.getProtocol().isOAuthConfigurable()) {
-            final OAuth2RequestInterceptor oauth = new OAuth2RequestInterceptor(builder.build(ProxyFactory.get()
-                    .find(host.getProtocol().getOAuthAuthorizationUrl()), this, prompt).build(), host, prompt)
+            final OAuth2RequestInterceptor oauth = new OAuth2RequestInterceptor(configuration.build(), host, prompt)
                     .withRedirectUri(host.getProtocol().getOAuthRedirectUrl());
             if(host.getProtocol().getAuthorization() != null) {
                 oauth.withFlowType(OAuth2AuthorizationService.FlowType.valueOf(host.getProtocol().getAuthorization()));
@@ -279,7 +259,8 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             final STSAssumeRoleCredentialsRequestInterceptor interceptor
                     = new STSAssumeRoleCredentialsRequestInterceptor(oauth, this, trust, key, prompt);
             configuration.addInterceptorLast(interceptor);
-            configuration.setServiceUnavailableRetryStrategy(new S3AuthenticationResponseInterceptor(this, interceptor));
+            configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+                    new S3AuthenticationResponseInterceptor(this, interceptor)));
             return interceptor;
         }
         else {
@@ -302,7 +283,8 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
                         }
                     });
                 }
-                configuration.setServiceUnavailableRetryStrategy(interceptor);
+                configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+                        new ExecutionCountServiceUnavailableRetryStrategy(interceptor)));
                 return interceptor;
             }
             else {
@@ -312,58 +294,58 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         final Credentials credentials = authentication.get();
         if(credentials.isAnonymousLogin()) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Connect with no credentials to %s", host));
-            }
+            log.debug("Connect non-authenticated with no credentials for {}", host);
             client.setProviderCredentials(null);
         }
         else {
             if(credentials.getTokens().validate()) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Connect with session credentials to %s", host));
-                }
+                log.debug("Connect with session token for {}", host);
                 client.setProviderCredentials(new AWSSessionCredentials(
                         credentials.getTokens().getAccessKeyId(), credentials.getTokens().getSecretAccessKey(),
                         credentials.getTokens().getSessionToken()));
             }
             else {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Connect with basic credentials to %s", host));
-                }
+                log.debug("Connect with static keys for {}", host);
                 client.setProviderCredentials(new AWSCredentials(credentials.getUsername(), credentials.getPassword()));
             }
         }
-        if(host.getCredentials().isPassed()) {
-            log.warn(String.format("Skip verifying credentials with previous successful authentication event for %s", this));
-            return;
-        }
-        try {
-            final Path home = new DelegatingHomeFeature(new DefaultPathHomeFeature(host)).find();
-            final Location.Name location = new S3PathStyleFallbackAdapter<>(client, new BackgroundExceptionCallable<Location.Name>() {
-                @Override
-                public Location.Name call() throws BackgroundException {
-                    return new S3LocationFeature(S3Session.this, regions).getLocation(home);
+        final Path home = new DelegatingHomeFeature(new DefaultPathHomeFeature(host)).find();
+        if(S3Session.isAwsHostname(host.getHostname(), false)) {
+            if(StringUtils.isEmpty(RequestEntityRestStorageService.findBucketInHostname(host))) {
+                if(client.isAuthenticatedConnection()) {
+                    final CustomClientConfiguration configuration = new CustomClientConfiguration(host,
+                            new ThreadLocalHostnameDelegatingTrustManager(trust, host.getHostname()), key);
+                    final AWSSecurityTokenServiceClientBuilder builder = AWSSecurityTokenServiceClientBuilder.standard()
+                            .withEndpointConfiguration(new AwsClientBuilder.EndpointConfiguration(host.getProtocol().getSTSEndpoint(), null))
+                            .withCredentials(AWSCredentialsConfigurator.toAWSCredentialsProvider(client.getProviderCredentials()))
+                            .withClientConfiguration(configuration);
+                    final AWSSecurityTokenService service = builder.build();
+                    // Returns details about the IAM user or role whose credentials are used to call the operation.
+                    // No permissions are required to perform this operation.
+                    try {
+                        final GetCallerIdentityResult identity = service.getCallerIdentity(new GetCallerIdentityRequest());
+                        log.debug("Successfully verified credentials for {}", identity);
+                        return;
+                    }
+                    catch(AWSSecurityTokenServiceException e) {
+                        throw new STSExceptionMappingService().map(e);
+                    }
                 }
-            }).call();
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Retrieved region %s", location));
             }
+        }
+        if(home.isRoot() && StringUtils.isEmpty(RequestEntityRestStorageService.findBucketInHostname(host))) {
+            log.debug("Skip querying region for {}", home);
+            new S3ListService(this, acl).list(home, new DisabledListProgressListener());
+        }
+        else {
+            final Location.Name location = new S3LocationFeature(this, regions).getLocation(home);
+            log.debug("Retrieved region {}", location);
             if(!Location.unknown.equals(location)) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Set default region to %s determined from %s", location, home));
-                }
-                //
+                log.debug("Set default region to {} determined from {}", location, home);
                 host.setProperty("s3.location", location.getIdentifier());
-            }
-        }
-        catch(AccessDeniedException | InteroperabilityException e) {
-            log.warn(String.format("Failure %s querying region", e));
-            final Path home = new DefaultHomeFinderService(this).find();
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Retrieved %s", home));
             }
         }
     }
@@ -387,18 +369,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
     @SuppressWarnings("unchecked")
     public <T> T _getFeature(final Class<T> type) {
         if(type == ListService.class) {
-            final S3ListService proxy = new S3ListService(this, acl);
-            return (T) new ListService() {
-                @Override
-                public AttributedList<Path> list(final Path directory, final ListProgressListener listener) throws BackgroundException {
-                    return new S3PathStyleFallbackAdapter<>(client, new BackgroundExceptionCallable<AttributedList<Path>>() {
-                        @Override
-                        public AttributedList<Path> call() throws BackgroundException {
-                            return proxy.list(directory, listener);
-                        }
-                    }).call();
-                }
-            };
+            return (T) new S3ListService(this, acl);
         }
         if(type == Read.class) {
             return (T) new S3ReadFeature(this);
@@ -416,23 +387,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             return (T) new S3ThresholdUploadService(this, acl);
         }
         if(type == Directory.class) {
-            final S3DirectoryFeature proxy = new S3DirectoryFeature(this, new S3WriteFeature(this, acl), acl);
-            return (T) new Directory<StorageObject>() {
-                @Override
-                public Path mkdir(final Path folder, final TransferStatus status) throws BackgroundException {
-                    return new S3PathStyleFallbackAdapter<>(client, new BackgroundExceptionCallable<Path>() {
-                        @Override
-                        public Path call() throws BackgroundException {
-                            return proxy.mkdir(folder, status);
-                        }
-                    }).call();
-                }
-
-                @Override
-                public Directory<StorageObject> withWriter(final Write<StorageObject> writer) {
-                    return proxy.withWriter(writer);
-                }
-            };
+            return (T) new S3DirectoryFeature(this, new S3WriteFeature(this, acl), acl);
         }
         if(type == Move.class) {
             return (T) new S3MoveFeature(this, acl);
@@ -447,7 +402,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             if(S3Session.isAwsHostname(host.getHostname())) {
                 return (T) new S3ThresholdDeleteFeature(this, acl);
             }
-            return (T) new S3DefaultDeleteFeature(this);
+            return (T) new S3DefaultDeleteFeature(this, acl);
         }
         if(type == AclPermission.class) {
             return (T) acl;
@@ -492,18 +447,7 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             return (T) new S3FindFeature(this, acl);
         }
         if(type == AttributesFinder.class) {
-            final S3AttributesFinderFeature proxy = new S3AttributesFinderFeature(this, acl);
-            return (T) new AttributesFinder() {
-                @Override
-                public PathAttributes find(final Path file, final ListProgressListener listener) throws BackgroundException {
-                    return new S3PathStyleFallbackAdapter<>(client, new BackgroundExceptionCallable<PathAttributes>() {
-                        @Override
-                        public PathAttributes call() throws BackgroundException {
-                            return proxy.find(file, listener);
-                        }
-                    }).call();
-                }
-            };
+            return (T) new S3AttributesFinderFeature(this, acl);
         }
         if(type == TransferAcceleration.class) {
             // Only for AWS. Disable transfer acceleration for AWS GovCloud
@@ -525,7 +469,9 @@ public class S3Session extends HttpSession<RequestEntityRestStorageService> {
             return (T) new S3SearchFeature(this, acl);
         }
         if(type == Scheduler.class) {
-            return (T) new DelegatingSchedulerFeature(new CloudFrontDistributionConfigurationPreloader(this));
+            if(new HostPreferences(host).getBoolean("s3.cloudfront.preload.enable")) {
+                return (T) scheduler;
+            }
         }
         if(type == Restore.class) {
             return (T) glacier;

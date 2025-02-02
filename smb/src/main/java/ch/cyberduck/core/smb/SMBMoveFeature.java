@@ -24,10 +24,10 @@ import ch.cyberduck.core.features.Delete.Callback;
 import ch.cyberduck.core.features.Move;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import java.io.IOException;
 import java.text.MessageFormat;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.Optional;
 
 import com.hierynomus.msdtyp.AccessMask;
 import com.hierynomus.msfscc.FileAttributes;
@@ -37,7 +37,6 @@ import com.hierynomus.mssmb2.SMB2ShareAccess;
 import com.hierynomus.smbj.common.SMBRuntimeException;
 import com.hierynomus.smbj.common.SmbPath;
 import com.hierynomus.smbj.share.DiskEntry;
-import com.hierynomus.smbj.share.DiskShare;
 
 public class SMBMoveFeature implements Move {
 
@@ -54,33 +53,37 @@ public class SMBMoveFeature implements Move {
 
     @Override
     public Path move(final Path source, final Path target, final TransferStatus status, final Callback delete, final ConnectionCallback prompt) throws BackgroundException {
-        try (final DiskShare share = session.openShare(source)) {
-            try (DiskEntry file = share.open(new SMBPathContainerService(session).getKey(source),
+        final SMBSession.DiskShareWrapper share = session.openShare(source);
+        try {
+            try (DiskEntry file = share.get().open(new SMBPathContainerService(session).getKey(source),
                     Collections.singleton(AccessMask.DELETE),
                     Collections.singleton(FileAttributes.FILE_ATTRIBUTE_NORMAL),
                     Collections.singleton(SMB2ShareAccess.FILE_SHARE_READ),
                     SMB2CreateDisposition.FILE_OPEN,
                     Collections.singleton(source.isDirectory() ? SMB2CreateOptions.FILE_DIRECTORY_FILE : SMB2CreateOptions.FILE_NON_DIRECTORY_FILE))) {
-                file.rename(new SmbPath(share.getSmbPath(), new SMBPathContainerService(session).getKey(target)).getPath(), status.isExists());
+                file.rename(new SmbPath(share.get().getSmbPath(), new SMBPathContainerService(session).getKey(target)).getPath(), status.isExists());
             }
-        }
-        catch(IOException e) {
-            throw new SMBTransportExceptionMappingService().map("Cannot read container configuration", e);
         }
         catch(SMBRuntimeException e) {
             throw new SMBExceptionMappingService().map("Cannot rename {0}", e, source);
         }
         finally {
-            session.releaseShare(source);
+            session.releaseShare(share);
         }
-        return target;
+        // Copy original file attributes
+        return target.withAttributes(source.attributes());
     }
 
     @Override
-    public void preflight(final Path source, final Path target) throws BackgroundException {
-        final SMBPathContainerService containerService = new SMBPathContainerService(session);
-        if(!containerService.getContainer(source).equals(containerService.getContainer(target))) {
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
+        if(source.isVolume()) {
             throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot rename {0}", "Error"), source.getName())).withFile(source);
+        }
+        if(target.isPresent()) {
+            final SMBPathContainerService containerService = new SMBPathContainerService(session);
+            if(!containerService.getContainer(source).equals(containerService.getContainer(target.get()))) {
+                throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot rename {0}", "Error"), source.getName())).withFile(source);
+            }
         }
     }
 }

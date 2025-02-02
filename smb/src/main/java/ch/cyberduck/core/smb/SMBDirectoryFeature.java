@@ -18,13 +18,9 @@ package ch.cyberduck.core.smb;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.transfer.TransferStatus;
 
-import java.io.IOException;
-
 import com.hierynomus.smbj.common.SMBRuntimeException;
-import com.hierynomus.smbj.share.DiskShare;
 
 public class SMBDirectoryFeature implements Directory<Integer> {
 
@@ -36,23 +32,16 @@ public class SMBDirectoryFeature implements Directory<Integer> {
 
     @Override
     public Path mkdir(final Path folder, final TransferStatus status) throws BackgroundException {
-        try (final DiskShare share = session.openShare(folder)) {
-            share.mkdir(new SMBPathContainerService(session).getKey(folder));
-        }
-        catch(IOException e) {
-            throw new SMBTransportExceptionMappingService().map("Cannot read container configuration", e);
+        final SMBSession.DiskShareWrapper share = session.openShare(folder);
+        try {
+            share.get().mkdir(new SMBPathContainerService(session).getKey(folder));
         }
         catch(SMBRuntimeException e) {
             throw new SMBExceptionMappingService().map("Cannot create folder {0}", e, folder);
         }
         finally {
-            session.releaseShare(folder);
+            session.releaseShare(share);
         }
-        return folder.withAttributes(new SMBAttributesFinderFeature(session).find(folder));
-    }
-
-    @Override
-    public SMBDirectoryFeature withWriter(final Write<Integer> writer) {
-        return this;
+        return folder;
     }
 }

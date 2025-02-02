@@ -29,13 +29,15 @@ import ch.cyberduck.core.UseragentProvider;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.*;
+import ch.cyberduck.core.http.CustomServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.DefaultHttpRateLimiter;
+import ch.cyberduck.core.http.ExecutionCountServiceUnavailableRetryStrategy;
 import ch.cyberduck.core.http.HttpSession;
 import ch.cyberduck.core.http.RateLimitingHttpRequestInterceptor;
 import ch.cyberduck.core.oauth.OAuth2ErrorResponseInterceptor;
 import ch.cyberduck.core.oauth.OAuth2RequestInterceptor;
 import ch.cyberduck.core.preferences.HostPreferences;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 import ch.cyberduck.core.threading.CancelCallback;
@@ -73,13 +75,14 @@ public class DropboxSession extends HttpSession<CustomDbxRawClientV2> {
     }
 
     @Override
-    protected CustomDbxRawClientV2 connect(final Proxy proxy, final HostKeyCallback callback, final LoginCallback prompt, final CancelCallback cancel) throws ConnectionCanceledException {
+    protected CustomDbxRawClientV2 connect(final ProxyFinder proxy, final HostKeyCallback callback, final LoginCallback prompt, final CancelCallback cancel) throws ConnectionCanceledException {
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
         authorizationService = new OAuth2RequestInterceptor(configuration.build(), host, prompt)
                 .withRedirectUri(host.getProtocol().getOAuthRedirectUrl())
                 .withParameter("token_access_type", "offline");
         configuration.addInterceptorLast(authorizationService);
-        configuration.setServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService));
+        configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+                new ExecutionCountServiceUnavailableRetryStrategy(new OAuth2ErrorResponseInterceptor(host, authorizationService))));
         if(new HostPreferences(host).getBoolean("dropbox.limit.requests.enable")) {
             configuration.addInterceptorLast(new RateLimitingHttpRequestInterceptor(new DefaultHttpRateLimiter(
                     new HostPreferences(host).getInteger("dropbox.limit.requests.second")
@@ -93,13 +96,11 @@ public class DropboxSession extends HttpSession<CustomDbxRawClientV2> {
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         try {
             final Credentials credentials = authorizationService.validate();
             final FullAccount account = new DbxUserUsersRequests(client).getCurrentAccount();
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Authenticated as user %s", account));
-            }
+            log.debug("Authenticated as user {}", account);
             credentials.setUsername(account.getEmail());
             switch(account.getAccountType()) {
                 // The features listed below are only available to customers on Dropbox Professional, Standard, Advanced, and Enterprise.
@@ -115,9 +116,7 @@ public class DropboxSession extends HttpSession<CustomDbxRawClientV2> {
             }
             // The Dropbox API Path Root is the folder that an API request operates relative to.
             final PathRoot root = PathRoot.root(account.getRootInfo().getRootNamespaceId());
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Set path root to %s", root));
-            }
+            log.debug("Set path root to {}", root);
             this.root = root;
         }
         catch(DbxException e) {
@@ -190,7 +189,7 @@ public class DropboxSession extends HttpSession<CustomDbxRawClientV2> {
             return (T) new DropboxVersioningFeature(this);
         }
         if(type == PathContainerService.class) {
-            return (T) new DropboxPathContainerService(this);
+            return (T) new DropboxPathContainerService();
         }
         return super._getFeature(type);
     }

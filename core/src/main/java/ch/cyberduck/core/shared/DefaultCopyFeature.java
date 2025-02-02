@@ -15,11 +15,7 @@ package ch.cyberduck.core.shared;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.ConnectionCallback;
-import ch.cyberduck.core.LocaleFactory;
-import ch.cyberduck.core.Path;
-import ch.cyberduck.core.PathAttributes;
-import ch.cyberduck.core.Session;
+import ch.cyberduck.core.*;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.UnsupportedException;
 import ch.cyberduck.core.features.Copy;
@@ -30,13 +26,13 @@ import ch.cyberduck.core.io.StatusOutputStream;
 import ch.cyberduck.core.io.StreamCopier;
 import ch.cyberduck.core.io.StreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
-
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import java.io.InputStream;
 import java.text.MessageFormat;
 import java.util.Objects;
+import java.util.Optional;
 
 public class DefaultCopyFeature implements Copy {
     private static final Logger log = LogManager.getLogger(DefaultCopyFeature.class);
@@ -62,17 +58,15 @@ public class DefaultCopyFeature implements Copy {
         out = writer.write(target, status, callback);
         new StreamCopier(status, status).withListener(listener).transfer(in, out);
         if(!PathAttributes.EMPTY.equals(status.getResponse())) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Received reply %s for creating file %s", status.getResponse(), target));
-            }
+            log.debug("Received reply {} for creating file {}", status.getResponse(), target);
             return new Path(target).withAttributes(status.getResponse());
         }
-        log.warn(String.format("Missing status from writer %s", writer));
+        log.warn("Missing status from writer {}", writer);
         return target;
     }
 
     @Override
-    public void preflight(final Path source, final Path target) throws BackgroundException {
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
         switch(from.getHost().getProtocol().getType()) {
             case ftp:
             case irods:
@@ -81,6 +75,7 @@ public class DefaultCopyFeature implements Copy {
                     throw new UnsupportedException(MessageFormat.format(LocaleFactory.localizedString("Cannot copy {0}", "Error"), source.getName())).withFile(source);
                 }
         }
+        Copy.super.preflight(source, target);
     }
 
     @Override

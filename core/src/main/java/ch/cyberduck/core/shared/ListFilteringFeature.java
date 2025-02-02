@@ -48,14 +48,10 @@ public abstract class ListFilteringFeature {
         // Try to match path only as the version might have changed in the meantime
         final Path found = list.find(new ListFilteringPredicate(session.getCaseSensitivity(), file));
         if(null == found) {
-            if(log.isWarnEnabled()) {
-                log.warn(String.format("File %s not found in directory listing", file));
-            }
+            log.warn("File {} not found in directory listing", file);
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return attributes %s for file %s", found.attributes(), file));
-            }
+            log.debug("Return attributes {} for file {}", found.attributes(), file);
         }
         return found;
     }
@@ -77,8 +73,12 @@ public abstract class ListFilteringFeature {
                 // Search with specific version and region
                 return super.test(f);
             }
-            if(f.attributes().isDuplicate() || f.attributes().isHidden()) {
+            if(f.attributes().isDuplicate()) {
                 // Filter previous versions and delete markers when searching for no specific version
+                return false;
+            }
+            if(f.attributes().isTrashed()) {
+                // Filter trashed files
                 return false;
             }
             switch(sensitivity) {
