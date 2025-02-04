@@ -20,7 +20,6 @@ import ch.cyberduck.core.DisabledConnectionCallback;
 import ch.cyberduck.core.DisabledListProgressListener;
 import ch.cyberduck.core.DisabledProgressListener;
 import ch.cyberduck.core.Filter;
-import ch.cyberduck.core.ListProgressListener;
 import ch.cyberduck.core.ListService;
 import ch.cyberduck.core.Local;
 import ch.cyberduck.core.Path;
@@ -28,8 +27,6 @@ import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.ProtocolFactory;
 import ch.cyberduck.core.Session;
 import ch.cyberduck.core.exception.BackgroundException;
-import ch.cyberduck.core.features.AttributesFinder;
-import ch.cyberduck.core.features.Find;
 import ch.cyberduck.core.features.Read;
 import ch.cyberduck.core.local.TemporaryFileService;
 import ch.cyberduck.core.local.TemporaryFileServiceFactory;
@@ -59,22 +56,33 @@ public class RemoteProfilesFinder implements ProfilesFinder {
     private final TemporaryFileService temp = TemporaryFileServiceFactory.get();
     private final ProtocolFactory protocols;
     private final Session<?> session;
+    private final TransferPathFilter comparison;
+    private final Filter<Path> filter;
 
     public RemoteProfilesFinder(final Session<?> session) {
         this(ProtocolFactory.get(), session);
     }
 
     public RemoteProfilesFinder(final ProtocolFactory protocols, final Session<?> session) {
+        this(protocols, session, new CompareFilter(new DisabledDownloadSymlinkResolver(), session), new ProfileFilter());
+    }
+
+    public RemoteProfilesFinder(final Session<?> session,
+                                final TransferPathFilter comparison, final Filter<Path> filter) {
+        this(ProtocolFactory.get(), session, comparison, filter);
+    }
+
+    public RemoteProfilesFinder(final ProtocolFactory protocols, final Session<?> session,
+                                final TransferPathFilter comparison, final Filter<Path> filter) {
         this.protocols = protocols;
         this.session = session;
+        this.comparison = comparison;
+        this.filter = filter;
     }
 
     @Override
     public Set<ProfileDescription> find(final Visitor visitor) throws BackgroundException {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Fetch profiles from %s", session.getHost()));
-        }
-        final ProfileFilter filter = new ProfileFilter();
+        log.info("Fetch profiles from {}", session.getHost());
         final AttributedList<Path> list = session.getFeature(ListService.class).list(new DelegatingHomeFeature(
                 new DefaultPathHomeFeature(session.getHost())).find(), new DisabledListProgressListener());
         return list.filter(filter).toStream().map(file -> visitor.visit(new RemoteProfileDescription(protocols, file,
@@ -83,24 +91,9 @@ public class RemoteProfilesFinder implements ProfilesFinder {
                     protected Local initialize() throws ConcurrentException {
                         try {
                             final Local local = temp.create("profiles", file);
-                            final TransferPathFilter filter = new CompareFilter(new DisabledDownloadSymlinkResolver(), session, new DisabledProgressListener())
-                                    .withFinder(new Find() {
-                                        @Override
-                                        public boolean find(final Path file, final ListProgressListener listener) {
-                                            return true;
-                                        }
-                                    })
-                                    .withAttributes(new AttributesFinder() {
-                                        @Override
-                                        public PathAttributes find(final Path file, final ListProgressListener listener) {
-                                            return file.attributes();
-                                        }
-                                    });
-                            if(filter.accept(file, local, new TransferStatus().exists(true))) {
+                            if(comparison.accept(file, local, new TransferStatus().exists(true), new DisabledProgressListener())) {
                                 final Read read = session.getFeature(Read.class);
-                                if(log.isInfoEnabled()) {
-                                    log.info(String.format("Download profile %s", file));
-                                }
+                                log.info("Download profile {}", file);
                                 // Read latest version
                                 try (InputStream in = read.read(file.withAttributes(new PathAttributes(file.attributes())
                                         // Read latest version

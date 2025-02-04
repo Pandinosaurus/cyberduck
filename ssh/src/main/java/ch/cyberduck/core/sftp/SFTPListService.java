@@ -59,12 +59,16 @@ public class SFTPListService implements ListService {
     public AttributedList<Path> list(final Path directory, final ListProgressListener listener) throws BackgroundException {
         final AttributedList<Path> children = new AttributedList<Path>();
         try (RemoteDirectory handle = session.sftp().openDir(directory.getAbsolute())) {
-            for(List<RemoteResourceInfo> list : ListUtils.partition(handle.scan(new RemoteResourceFilter() {
-                        @Override
-                        public boolean accept(RemoteResourceInfo remoteResourceInfo) {
-                            return true;
-                        }
-                    }),
+            final List<RemoteResourceInfo> resources = handle.scan(new RemoteResourceFilter() {
+                @Override
+                public boolean accept(RemoteResourceInfo remoteResourceInfo) {
+                    return true;
+                }
+            });
+            if(resources.isEmpty()) {
+                listener.chunk(directory, children);
+            }
+            for(List<RemoteResourceInfo> list : ListUtils.partition(resources,
                     new HostPreferences(session.getHost()).getInteger("sftp.listing.chunksize"))) {
                 for(RemoteResourceInfo f : list) {
                     final PathAttributes attr = attributes.toAttributes(f.getAttributes());
@@ -83,11 +87,8 @@ public class SFTPListService implements ListService {
                     final Path file = new Path(directory, f.getName(), type, attr);
                     if(this.post(file)) {
                         children.add(file);
-                        listener.chunk(directory, children);
                     }
                 }
-            }
-            if(children.isEmpty()) {
                 listener.chunk(directory, children);
             }
             return children;
@@ -123,16 +124,16 @@ public class SFTPListService implements ListService {
                 catch(SFTPException e) {
                     final BackgroundException reason = new SFTPExceptionMappingService().map(e);
                     if(reason instanceof NotfoundException) {
-                        log.warn(String.format("Cannot find symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Cannot find symbolic link target of {}. {}", file, reason.toString());
                     }
                     else if(reason instanceof AccessDeniedException) {
-                        log.warn(String.format("Cannot find symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Cannot find symbolic link target of {}. {}", file, reason.toString());
                     }
                     else if(reason instanceof InteroperabilityException) {
-                        log.warn(String.format("Cannot find symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Cannot find symbolic link target of {}. {}", file, reason.toString());
                     }
                     else {
-                        log.warn(String.format("Unknown failure reading symbolic link target of %s. %s", file, reason.toString()));
+                        log.warn("Unknown failure reading symbolic link target of {}. {}", file, reason.toString());
                         throw reason;
                     }
                     type = Path.Type.file;
@@ -144,7 +145,7 @@ public class SFTPListService implements ListService {
                 file.setSymlinkTarget(target);
             }
             catch(IOException e) {
-                log.warn(String.format("Failure to read symbolic link of %s. %s", file, e.getMessage()));
+                log.warn("Failure to read symbolic link of {}. {}", file, e.getMessage());
                 return false;
             }
         }

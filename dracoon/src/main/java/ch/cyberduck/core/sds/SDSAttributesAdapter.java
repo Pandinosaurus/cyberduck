@@ -21,6 +21,7 @@ import ch.cyberduck.core.PathAttributes;
 import ch.cyberduck.core.Permission;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.AttributesAdapter;
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.sds.io.swagger.client.model.DeletedNode;
 import ch.cyberduck.core.sds.io.swagger.client.model.Node;
@@ -67,7 +68,8 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
             attributes.setSize(node.getSize());
         }
         if(null != node.getQuota()) {
-            attributes.setQuota(node.getQuota());
+            // Remaining space
+            attributes.setQuota(new Quota.Space(node.getSize(), node.getQuota()));
         }
         attributes.setPermission(this.toPermission(node));
         if(null != node.getUpdatedBy()) {
@@ -154,11 +156,11 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
                                 permission.setUser(Permission.Action.none.or(Permission.Action.read));
                             }
                             else {
-                                log.warn(String.format("Missing read permission for node %s with missing key pair", node));
+                                log.warn("Missing read permission for node {} with missing key pair", node);
                             }
                         }
                         catch(BackgroundException e) {
-                            log.warn(String.format("Ignore failure %s retrieving key pair", e));
+                            log.warn("Ignore failure {} retrieving key pair", e.getMessage());
                         }
                     }
                     else {
@@ -171,9 +173,7 @@ public class SDSAttributesAdapter implements AttributesAdapter<Node> {
                     }
                     break;
             }
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Map node permissions %s to %s", node.getPermissions(), permission));
-            }
+            log.debug("Map node permissions {} to {}", node.getPermissions(), permission);
         }
         return permission;
     }

@@ -66,7 +66,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
         protected SessionPool Session
         {
-            get { return BrowserController.Session; }
+            get { return BrowserController.Pool; }
         }
 
         protected virtual bool ValidateInput()
@@ -83,13 +83,13 @@ namespace Ch.Cyberduck.Ui.Controller
             {
                 if (
                     BrowserController.Cache.get(BrowserController.Workdir)
-                        .contains(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.file))))
+                        .toStream().filter(new SimplePathPredicate(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.file)))).findAny().isPresent())
                 {
                     return false;
                 }
                 if (
                     BrowserController.Cache.get(BrowserController.Workdir)
-                        .contains(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.directory))))
+                        .toStream().filter(new SimplePathPredicate(new Path(BrowserController.Workdir, t, EnumSet.of(AbstractPath.Type.directory)))).findAny().isPresent())
                 {
                     return false;
                 }

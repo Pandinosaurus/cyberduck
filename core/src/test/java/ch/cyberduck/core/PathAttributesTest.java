@@ -1,5 +1,6 @@
 package ch.cyberduck.core;
 
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.HashAlgorithm;
 import ch.cyberduck.core.serializer.PathAttributesDictionary;
@@ -7,7 +8,6 @@ import ch.cyberduck.core.serializer.PathAttributesDictionary;
 import org.apache.commons.collections4.CollectionUtils;
 import org.junit.Test;
 
-import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -19,7 +19,7 @@ public class PathAttributesTest {
     public void testCopy() {
         final PathAttributes attributes = new PathAttributes();
         attributes.setSize(1L);
-        attributes.setQuota(10L);
+        attributes.setQuota(new Quota.Space(1L, 10L));
         attributes.setModificationDate(System.currentTimeMillis());
         attributes.setRevision(2L);
         attributes.setFileId(new AlphanumericRandomStringService().random());
@@ -29,6 +29,8 @@ public class PathAttributesTest {
         attributes.setLockId(new AlphanumericRandomStringService().random());
         attributes.setPermission(new Permission(644));
         attributes.setVerdict(PathAttributes.Verdict.pending);
+        attributes.setTrashed(true);
+        attributes.setHidden(true);
         final PathAttributes clone = new PathAttributes(attributes);
         assertEquals(clone.getPermission(), attributes.getPermission());
         assertEquals(clone.getModificationDate(), attributes.getModificationDate());
@@ -39,8 +41,10 @@ public class PathAttributesTest {
         assertNotEquals(attributes.getVersionId(), clone.getVersionId());
         assertEquals(attributes.getPermission(), clone.getPermission());
         assertNotSame(attributes.getPermission(), clone.getPermission());
-        attributes.setLink(new DescriptiveUrl(URI.create("http://g")));
+        attributes.setLink(new DescriptiveUrl("http://g"));
         assertEquals(DescriptiveUrl.EMPTY, clone.getLink());
+        assertTrue(clone.isTrashed());
+        assertTrue(clone.isHidden());
     }
 
     @Test
@@ -81,6 +85,8 @@ public class PathAttributesTest {
         attributes.setRegion("region");
         attributes.setStorageClass("storageClass");
         attributes.setVerdict(PathAttributes.Verdict.pending);
+        attributes.setTrashed(false);
+        attributes.setHidden(true);
         final Map<String, String> custom = new HashMap<>(attributes.getCustom());
         custom.put("key", "value");
         attributes.setCustom(custom);
@@ -98,5 +104,7 @@ public class PathAttributesTest {
         assertEquals(attributes.getVerdict(), deserialized.getVerdict());
         assertEquals(attributes.getCustom(), deserialized.getCustom());
         assertEquals(attributes, deserialized);
+        assertFalse(deserialized.isTrashed());
+        assertTrue(deserialized.isHidden());
     }
 }

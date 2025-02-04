@@ -32,7 +32,6 @@ public class TransferWorkerBackgroundAction<T> extends RegistryBackgroundAction<
 
     private final SessionPool pool;
     protected final TransferWorker<T> worker;
-    protected T result;
 
     public TransferWorkerBackgroundAction(final Controller controller, final SessionPool pool, final TransferWorker<T> worker) {
         super(controller, pool);
@@ -47,9 +46,7 @@ public class TransferWorkerBackgroundAction<T> extends RegistryBackgroundAction<
 
     @Override
     public T run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run worker %s", worker));
-        }
+        log.debug("Run worker {}", worker);
         try {
             pool.release(session, null);
             return worker.run(session);
@@ -61,25 +58,21 @@ public class TransferWorkerBackgroundAction<T> extends RegistryBackgroundAction<
     }
 
     @Override
-    public void cleanup() {
+    public void cleanup(final T result, final BackgroundException failure) {
         if(null == result) {
-            log.warn(String.format("Missing result for worker %s. Use default value.", worker));
-            worker.cleanup(worker.initialize());
+            log.warn("Missing result for worker {}. Use default value.", worker);
+            worker.cleanup(worker.initialize(), failure);
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Cleanup worker %s", worker));
-            }
-            worker.cleanup(result);
+            log.debug("Cleanup worker {}", worker);
+            worker.cleanup(result, failure);
         }
-        super.cleanup();
+        super.cleanup(result, failure);
     }
 
     @Override
     public void cancel() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Cancel worker %s", worker));
-        }
+        log.debug("Cancel worker {}", worker);
         worker.cancel();
         super.cancel();
     }

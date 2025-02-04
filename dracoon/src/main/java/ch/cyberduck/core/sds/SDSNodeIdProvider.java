@@ -30,8 +30,11 @@ import ch.cyberduck.core.unicode.NFCNormalizer;
 import ch.cyberduck.core.unicode.UnicodeNormalizer;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpStatus;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import java.util.concurrent.Callable;
 
 public class SDSNodeIdProvider extends CachingVersionIdProvider implements VersionIdProvider {
     private static final Logger log = LogManager.getLogger(SDSNodeIdProvider.class);
@@ -49,16 +52,12 @@ public class SDSNodeIdProvider extends CachingVersionIdProvider implements Versi
     @Override
     public String getVersionId(final Path file) throws BackgroundException {
         if(StringUtils.isNotBlank(file.attributes().getVersionId())) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return version %s from attributes for file %s", file.attributes().getVersionId(), file));
-            }
+            log.debug("Return version {} from attributes for file {}", file.attributes().getVersionId(), file);
             return file.attributes().getVersionId();
         }
         final String cached = super.getVersionId(file);
         if(cached != null) {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return cached versionid %s for file %s", cached, file));
-            }
+            log.debug("Return cached versionid {} for file {}", cached, file);
             return cached;
         }
         return this.getNodeId(file, new HostPreferences(session.getHost()).getInteger("sds.listing.chunksize"));
@@ -81,17 +80,24 @@ public class SDSNodeIdProvider extends CachingVersionIdProvider implements Versi
             int offset = 0;
             NodeList nodes;
             do {
-                nodes = new NodesApi(session.getClient()).searchNodes(
-                        URIEncoder.encode(normalizer.normalize(file.getName()).toString()),
-                        StringUtils.EMPTY, -1, null,
-                        String.format("type:eq:%s|parentPath:eq:%s/", type, file.getParent().isRoot() ? StringUtils.EMPTY : file.getParent().getAbsolute()),
-                        null, offset, chunksize, null);
+                if(StringUtils.isNoneBlank(file.getParent().attributes().getVersionId())) {
+                    nodes = new NodesApi(session.getClient()).searchNodes(
+                            URIEncoder.encode(normalizer.normalize(file.getName()).toString()),
+                            StringUtils.EMPTY, 0, Long.valueOf(file.getParent().attributes().getVersionId()),
+                            String.format("type:eq:%s", type),
+                            null, offset, chunksize, null);
+                }
+                else {
+                    nodes = new NodesApi(session.getClient()).searchNodes(
+                            URIEncoder.encode(normalizer.normalize(file.getName()).toString()),
+                            StringUtils.EMPTY, -1, null,
+                            String.format("type:eq:%s|parentPath:eq:%s/", type, file.getParent().isRoot() ? StringUtils.EMPTY : file.getParent().getAbsolute()),
+                            null, offset, chunksize, null);
+                }
                 for(Node node : nodes.getItems()) {
-                    // Case insensitive
+                    // Case-insensitive
                     if(node.getName().equalsIgnoreCase(normalizer.normalize(file.getName()).toString())) {
-                        if(log.isInfoEnabled()) {
-                            log.info(String.format("Return node %s for file %s", node.getId(), file));
-                        }
+                        log.info("Return node {} for file {}", node.getId(), file);
                         return this.cache(file, node.getId().toString());
                     }
                 }
@@ -103,5 +109,26 @@ public class SDSNodeIdProvider extends CachingVersionIdProvider implements Versi
         catch(ApiException e) {
             throw new SDSExceptionMappingService(this).map("Failure to read attributes of {0}", e, file);
         }
+    }
+
+    public <V> V retry(final Path file, final ApiExceptionCallable<V> callable) throws ApiException, BackgroundException {
+        try {
+            return callable.call();
+        }
+        catch(ApiException e) {
+            switch(e.getCode()) {
+                case HttpStatus.SC_NOT_FOUND:
+                    // Parent directory not found. Try again with resetting node id cache
+                    this.cache(file, null);
+                    log.warn("Retry {}", callable);
+                    return callable.call();
+            }
+            throw e;
+        }
+    }
+
+    public interface ApiExceptionCallable<T> extends Callable<T> {
+        @Override
+        T call() throws ApiException, BackgroundException;
     }
 }

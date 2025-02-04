@@ -19,6 +19,7 @@ package ch.cyberduck.core;
  */
 
 import ch.cyberduck.core.features.Encryption;
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.serializer.Serializer;
 import ch.cyberduck.core.transfer.TransferStatus;
@@ -48,7 +49,7 @@ public class PathAttributes extends Attributes implements Serializable {
     /**
      * Quota of folder
      */
-    private long quota = TransferStatus.UNKNOWN_LENGTH;
+    private Quota.Space quota = Quota.unknown;
 
     /**
      * The file modification date in milliseconds
@@ -109,10 +110,16 @@ public class PathAttributes extends Attributes implements Serializable {
      * Should be hidden in the browser by default
      */
     private Boolean duplicate;
+
     /**
      * Hidden flag set on server
      */
     private Boolean hidden;
+
+    /**
+     * Trashed
+     */
+    private Boolean trashed;
 
     /**
      * Revision number
@@ -185,6 +192,7 @@ public class PathAttributes extends Attributes implements Serializable {
         lockId = copy.lockId;
         duplicate = copy.duplicate;
         hidden = copy.hidden;
+        trashed = copy.trashed;
         revision = copy.revision;
         region = copy.region;
         displayname = copy.displayname;
@@ -203,8 +211,9 @@ public class PathAttributes extends Attributes implements Serializable {
         if(size != -1) {
             dict.setStringForKey(String.valueOf(size), "Size");
         }
-        if(quota != -1) {
-            dict.setStringForKey(String.valueOf(quota), "Quota");
+        if(quota != Quota.unknown) {
+            // Set remaining quota
+            dict.setStringForKey(String.valueOf(quota.available), "Quota");
         }
         if(modified != -1) {
             dict.setStringForKey(String.valueOf(modified), "Modified");
@@ -240,6 +249,9 @@ public class PathAttributes extends Attributes implements Serializable {
             final Map<String, String> wrapper = new HashMap<>();
             wrapper.put("Algorithm", checksum.algorithm.name());
             wrapper.put("Hash", checksum.hash);
+            if(null != checksum.base64) {
+                wrapper.put("Base64", checksum.base64);
+            }
             dict.setMapForKey(wrapper, "Checksum");
         }
         if(StringUtils.isNotBlank(versionId)) {
@@ -260,6 +272,9 @@ public class PathAttributes extends Attributes implements Serializable {
         if(hidden != null) {
             dict.setStringForKey(String.valueOf(hidden), "Hidden");
         }
+        if(trashed != null) {
+            dict.setStringForKey(String.valueOf(trashed), "Trashed");
+        }
         if(StringUtils.isNotBlank(region)) {
             dict.setStringForKey(region, "Region");
         }
@@ -268,7 +283,7 @@ public class PathAttributes extends Attributes implements Serializable {
         }
         if(vault != null) {
             if(vault.attributes() == this) {
-                log.debug(String.format("Skip serializing vault attribute %s to avoid recursion", vault));
+                log.debug("Skip serializing vault attribute {} to avoid recursion", vault);
             }
             else {
                 dict.setObjectForKey(vault, "Vault");
@@ -303,15 +318,15 @@ public class PathAttributes extends Attributes implements Serializable {
         return this;
     }
 
-    public long getQuota() {
+    public Quota.Space getQuota() {
         return quota;
     }
 
-    public void setQuota(final long quota) {
+    public void setQuota(final Quota.Space quota) {
         this.quota = quota;
     }
 
-    public PathAttributes withQuota(final long quota) {
+    public PathAttributes withQuota(final Quota.Space quota) {
         this.setQuota(quota);
         return this;
     }
@@ -337,6 +352,11 @@ public class PathAttributes extends Attributes implements Serializable {
 
     public void setCreationDate(final long millis) {
         this.created = millis;
+    }
+
+    public PathAttributes withCreationDate(final long millis) {
+        this.setCreationDate(millis);
+        return this;
     }
 
     @Override
@@ -582,6 +602,24 @@ public class PathAttributes extends Attributes implements Serializable {
         this.hidden = hidden;
     }
 
+    public PathAttributes withHidden(final boolean hidden) {
+        this.setHidden(hidden);
+        return this;
+    }
+
+    public Boolean isTrashed() {
+        return trashed != null && trashed;
+    }
+
+    public void setTrashed(final boolean trashed) {
+        this.trashed = trashed;
+    }
+
+    public PathAttributes withTrashed(final boolean trashed) {
+        this.setTrashed(trashed);
+        return this;
+    }
+
     public Map<String, String> getMetadata() {
         return metadata;
     }
@@ -714,6 +752,7 @@ public class PathAttributes extends Attributes implements Serializable {
         sb.append(", lockId='").append(lockId).append('\'');
         sb.append(", duplicate=").append(duplicate);
         sb.append(", hidden=").append(hidden);
+        sb.append(", trashed=").append(trashed);
         sb.append(", revision=").append(revision);
         sb.append(", region='").append(region).append('\'');
         sb.append(", metadata=").append(metadata).append('\'');

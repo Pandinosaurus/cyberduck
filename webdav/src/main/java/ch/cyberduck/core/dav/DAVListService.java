@@ -61,11 +61,15 @@ public class DAVListService implements ListService {
     public AttributedList<Path> list(final Path directory, final ListProgressListener listener) throws BackgroundException {
         try {
             final AttributedList<Path> children = new AttributedList<>();
-            for(List<DavResource> list : ListUtils.partition(this.list(directory),
+            final List<DavResource> resources = this.list(directory);
+            if(resources.isEmpty()) {
+                listener.chunk(directory, children);
+            }
+            for(List<DavResource> list : ListUtils.partition(resources,
                     new HostPreferences(session.getHost()).getInteger("webdav.listing.chunksize"))) {
                 for(final DavResource resource : list) {
                     if(new SimplePathPredicate(new Path(resource.getHref().getPath(), EnumSet.of(Path.Type.directory))).test(directory)) {
-                        log.warn(String.format("Ignore resource %s", resource));
+                        log.warn("Ignore resource {}", resource);
                         // Do not include self
                         if(resource.isDirectory()) {
                             continue;
@@ -73,13 +77,15 @@ public class DAVListService implements ListService {
                         throw new NotfoundException(directory.getAbsolute());
                     }
                     final PathAttributes attr = attributes.toAttributes(resource);
-                    final Path file = new Path(directory, PathNormalizer.name(resource.getHref().getPath()),
-                            resource.isDirectory() ? EnumSet.of(Path.Type.directory) : EnumSet.of(Path.Type.file), attr);
+                    final EnumSet<Path.Type> type = resource.isDirectory() ? EnumSet.of(Path.Type.directory) : EnumSet.of(Path.Type.file);
+                    switch(resource.getStatusCode()) {
+                        // 425 Too Early for partial tus uploads
+                        case 425:
+                            type.add(Path.Type.upload);
+                    }
+                    final Path file = new Path(directory, PathNormalizer.name(resource.getHref().getPath()), type, attr);
                     children.add(file);
-                    listener.chunk(directory, children);
                 }
-            }
-            if(children.isEmpty()) {
                 listener.chunk(directory, children);
             }
             return children;

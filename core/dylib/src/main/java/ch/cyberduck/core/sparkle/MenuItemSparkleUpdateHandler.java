@@ -29,13 +29,12 @@ public class MenuItemSparkleUpdateHandler extends ProxyController implements Han
 
     public MenuItemSparkleUpdateHandler(final NSMenuItem menu) {
         this.menu = menu;
-        this.menu.setTarget(this.id());
     }
 
     @Override
     public boolean handle(final UpdateChecker.Update item) {
         menu.setTitle(String.format("%s. %s",
-                MessageFormat.format(LocaleFactory.localizedString("Version {0} is now available"), item.getDisplayVersionString()),
+                MessageFormat.format(LocaleFactory.localizedString("Version {0} is now available", "Updater"), item.getDisplayVersionString()),
                 String.format("%s…", LocaleFactory.localizedString("Install and Relaunch", "Updater"))));
         menu.setRepresentedObject(item.getRevision());
         return false;

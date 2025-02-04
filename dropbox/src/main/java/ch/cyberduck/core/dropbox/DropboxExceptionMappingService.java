@@ -22,6 +22,7 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConflictException;
 import ch.cyberduck.core.exception.ConnectionRefusedException;
 import ch.cyberduck.core.exception.InteroperabilityException;
+import ch.cyberduck.core.exception.LockedException;
 import ch.cyberduck.core.exception.LoginFailureException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.exception.QuotaException;
@@ -29,6 +30,8 @@ import ch.cyberduck.core.exception.RetriableAccessDeniedException;
 import ch.cyberduck.core.exception.UnsupportedException;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.StringReader;
 import java.time.Duration;
@@ -51,9 +54,11 @@ import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
 
 public class DropboxExceptionMappingService extends AbstractExceptionMappingService<DbxException> {
+    private static final Logger log = LogManager.getLogger(DropboxExceptionMappingService.class);
 
     @Override
     public BackgroundException map(final DbxException failure) {
+        log.warn("Map failure {}", failure.toString());
         final StringBuilder buffer = new StringBuilder();
         this.parse(buffer, failure.getMessage());
         if(failure instanceof InvalidAccessTokenException) {
@@ -80,6 +85,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
                 final LookupError lookup = error.getPathValue();
                 this.parse(buffer, lookup.toString());
                 switch(lookup.tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
                     case OTHER:
                         return new InteroperabilityException(buffer.toString(), failure);
                     case NOT_FOUND:
@@ -97,6 +104,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
             final LookupError lookup = error.getPathLookupValue();
             this.parse(buffer, lookup.toString());
             switch(lookup.tag()) {
+                case LOCKED:
+                    return new LockedException(buffer.toString(), failure);
                 case OTHER:
                     return new InteroperabilityException(buffer.toString(), failure);
                 case NOT_FOUND:
@@ -114,6 +123,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
                 final LookupError lookup = error.getPathValue();
                 this.parse(buffer, lookup.toString());
                 switch(lookup.tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
                     case OTHER:
                         return new InteroperabilityException(buffer.toString(), failure);
                     case NOT_FOUND:
@@ -151,6 +162,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
                 final LookupError lookup = error.getPathValue();
                 this.parse(buffer, lookup.toString());
                 switch(lookup.tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
                     case OTHER:
                         return new InteroperabilityException(buffer.toString(), failure);
                     case NOT_FOUND:
@@ -169,6 +182,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
                 final LookupError lookup = error.getPathValue();
                 this.parse(buffer, lookup.toString());
                 switch(lookup.tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
                     case OTHER:
                         return new InteroperabilityException(buffer.toString(), failure);
                     case NOT_FOUND:
@@ -225,6 +240,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
                 final LookupError lookup = error.getPathValue();
                 this.parse(buffer, lookup.toString());
                 switch(lookup.tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
                     case NOT_FOUND:
                     case NOT_FILE:
                     case NOT_FOLDER:
@@ -243,6 +260,8 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
                 final LookupError lookup = error.getPathValue();
                 this.parse(buffer, lookup.toString());
                 switch(lookup.tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
                     case NOT_FOUND:
                     case NOT_FILE:
                     case NOT_FOLDER:
@@ -273,11 +292,36 @@ public class DropboxExceptionMappingService extends AbstractExceptionMappingServ
         if(failure instanceof RelocationErrorException) {
             final RelocationError error = ((RelocationErrorException) failure).errorValue;
             switch(error.tag()) {
-                case TO:
-                    return new ConflictException(buffer.toString(), failure);
                 case TOO_MANY_FILES:
                 case INSUFFICIENT_QUOTA:
                     return new QuotaException(buffer.toString(), failure);
+            }
+            if(error.isTo()) {
+                switch(error.getToValue().tag()) {
+                    case MALFORMED_PATH:
+                    case DISALLOWED_NAME:
+                    case NO_WRITE_PERMISSION:
+                        return new AccessDeniedException(buffer.toString(), failure);
+                    case TOO_MANY_WRITE_OPERATIONS:
+                        return new RetriableAccessDeniedException(buffer.toString(), failure);
+                    case CONFLICT:
+                        return new ConflictException(buffer.toString(), failure);
+                    case INSUFFICIENT_SPACE:
+                        return new QuotaException(buffer.toString(), failure);
+                }
+            }
+            if(error.isFromLookup()) {
+                switch(error.getFromLookupValue().tag()) {
+                    case LOCKED:
+                        return new LockedException(buffer.toString(), failure);
+                    case NOT_FOUND:
+                    case NOT_FILE:
+                    case NOT_FOLDER:
+                        return new NotfoundException(buffer.toString(), failure);
+                    case MALFORMED_PATH:
+                    case RESTRICTED_CONTENT:
+                        return new AccessDeniedException(buffer.toString(), failure);
+                }
             }
         }
         return new InteroperabilityException(buffer.toString(), failure);

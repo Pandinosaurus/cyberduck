@@ -69,6 +69,7 @@ public class SSLExceptionMappingService extends AbstractExceptionMappingService<
      */
     @Override
     public BackgroundException map(final SSLException failure) {
+        log.warn("Map failure {}", failure.toString());
         final StringBuilder buffer = new StringBuilder();
         for(Throwable cause : ExceptionUtils.getThrowableList(failure)) {
             if(cause instanceof SocketException) {
@@ -85,7 +86,7 @@ public class SSLExceptionMappingService extends AbstractExceptionMappingService<
         }
         if(failure instanceof SSLHandshakeException) {
             if(ExceptionUtils.getRootCause(failure) instanceof CertificateException) {
-                log.warn(String.format("Ignore certificate failure %s and drop connection", failure.getMessage()));
+                log.warn("Ignore certificate failure {} and drop connection", failure.getMessage());
                 // Server certificate not accepted
                 return new ConnectionCanceledException(failure);
             }

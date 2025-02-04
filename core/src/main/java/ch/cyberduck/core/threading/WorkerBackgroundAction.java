@@ -35,8 +35,6 @@ public class WorkerBackgroundAction<T> extends RegistryBackgroundAction<T> {
 
     protected final Worker<T> worker;
 
-    protected T result;
-
     public WorkerBackgroundAction(final Controller controller,
                                   final SessionPool session,
                                   final Worker<T> worker) {
@@ -63,39 +61,32 @@ public class WorkerBackgroundAction<T> extends RegistryBackgroundAction<T> {
 
     @Override
     public T run(final Session<?> session) throws BackgroundException {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Run worker %s", worker));
-        }
+        log.debug("Run worker {}", worker);
         try {
-            result = worker.run(session);
+            return worker.run(session);
         }
         catch(ConnectionCanceledException e) {
             worker.cancel();
             throw e;
         }
-        return result;
     }
 
     @Override
-    public void cleanup() {
+    public void cleanup(final T result, final BackgroundException failure) {
         if(null == result) {
-            log.warn(String.format("Missing result for worker %s. Use default value.", worker));
-            worker.cleanup(worker.initialize());
+            log.warn("Missing result for worker {}. Use default value.", worker);
+            worker.cleanup(worker.initialize(), failure);
         }
         else {
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Cleanup worker %s", worker));
-            }
-            worker.cleanup(result);
+            log.debug("Cleanup worker {}", worker);
+            worker.cleanup(result, failure);
         }
-        super.cleanup();
+        super.cleanup(result, failure);
     }
 
     @Override
     public void cancel() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Cancel worker %s", worker));
-        }
+        log.debug("Cancel worker {}", worker);
         worker.cancel();
         super.cancel();
     }

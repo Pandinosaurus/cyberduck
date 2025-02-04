@@ -17,15 +17,18 @@ package ch.cyberduck.core;
  * Bug fixes, suggestions and comments should be sent to feedback@cyberduck.ch
  */
 
-import ch.cyberduck.core.features.Home;
 import ch.cyberduck.core.transfer.TransferItem;
 
 public class TransferItemCache extends AbstractCache<TransferItem> {
 
-    private static final CacheReference<TransferItem> NULL_KEY = new TransferItemCacheReference(new TransferItem(Home.ROOT));
+    private static final CacheReference<TransferItem> NULL_KEY = new TransferItemCacheReference(new TransferItem(null));
 
     public TransferItemCache(final int size) {
         super(size);
+    }
+
+    public TransferItemCache(final int size, final Long expireDuration) {
+        super(size, expireDuration);
     }
 
     @Override
@@ -40,7 +43,17 @@ public class TransferItemCache extends AbstractCache<TransferItem> {
         private final CacheReference<Path> proxy;
 
         public TransferItemCacheReference(final TransferItem object) {
-            this.proxy = new SimplePathPredicate(object.remote);
+            if(null == object.remote) {
+                this.proxy = new CacheReference<Path>() {
+                    @Override
+                    public boolean test(final Path f) {
+                        return null == f;
+                    }
+                };
+            }
+            else {
+                this.proxy = new SimplePathPredicate(object.remote);
+            }
         }
 
         @Override

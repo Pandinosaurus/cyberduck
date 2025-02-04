@@ -21,10 +21,10 @@ package ch.cyberduck.core.serializer;
 import ch.cyberduck.core.DescriptiveUrl;
 import ch.cyberduck.core.DeserializerFactory;
 import ch.cyberduck.core.PathAttributes;
+import ch.cyberduck.core.features.Quota;
 import ch.cyberduck.core.io.Checksum;
 import ch.cyberduck.core.io.HashAlgorithm;
 
-import java.net.URI;
 import java.util.Collections;
 import java.util.Map;
 
@@ -49,7 +49,7 @@ public class PathAttributesDictionary<T> {
         }
         final String quotaObj = dict.stringForKey("Quota");
         if(quotaObj != null) {
-            attributes.setQuota(Long.parseLong(quotaObj));
+            attributes.setQuota(new Quota.Space(attributes.getSize(), Long.parseLong(quotaObj)));
         }
         final String modifiedObj = dict.stringForKey("Modified");
         if(modifiedObj != null) {
@@ -79,17 +79,17 @@ public class PathAttributesDictionary<T> {
         }
         if(dict.mapForKey("Link") != null) {
             final Map<String, String> link = dict.mapForKey("Link");
-            attributes.setLink(new DescriptiveUrl(URI.create(link.get("Url")), DescriptiveUrl.Type.valueOf(link.get("Type"))));
+            attributes.setLink(new DescriptiveUrl(link.get("Url"), DescriptiveUrl.Type.valueOf(link.get("Type"))));
         }
         else {
             final String linkObj = dict.stringForKey("Link");
             if(linkObj != null) {
-                attributes.setLink(new DescriptiveUrl(URI.create(linkObj), DescriptiveUrl.Type.http));
+                attributes.setLink(new DescriptiveUrl(linkObj, DescriptiveUrl.Type.http));
             }
         }
         if(dict.mapForKey("Checksum") != null) {
             final Map<String, String> checksum = dict.mapForKey("Checksum");
-            attributes.setChecksum(new Checksum(HashAlgorithm.valueOf(checksum.get("Algorithm")), checksum.get("Hash")));
+            attributes.setChecksum(new Checksum(HashAlgorithm.valueOf(checksum.get("Algorithm")), checksum.get("Hash"), checksum.get("Base64")));
         }
         else {
             attributes.setChecksum(Checksum.parse(dict.stringForKey("Checksum")));
@@ -105,6 +105,10 @@ public class PathAttributesDictionary<T> {
         final String hiddenObj = dict.stringForKey("Hidden");
         if(hiddenObj != null) {
             attributes.setHidden(Boolean.parseBoolean(hiddenObj));
+        }
+        final String trashedObj = dict.stringForKey("Trashed");
+        if(trashedObj != null) {
+            attributes.setTrashed(Boolean.parseBoolean(trashedObj));
         }
         attributes.setMetadata(Collections.emptyMap());
         attributes.setRegion(dict.stringForKey("Region"));

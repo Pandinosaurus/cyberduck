@@ -21,11 +21,18 @@ import ch.cyberduck.core.exception.BackgroundException;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.exception.ExceptionUtils;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 public class DefaultExceptionMappingService extends AbstractExceptionMappingService<Throwable> {
+    private static final Logger log = LogManager.getLogger(DefaultExceptionMappingService.class);
 
     @Override
     public BackgroundException map(final Throwable failure) {
+        log.warn("Map failure {}", failure.toString());
+        if(failure instanceof BackgroundException) {
+            return (BackgroundException) failure;
+        }
         final StringBuilder buffer = new StringBuilder();
         if(failure instanceof RuntimeException) {
             this.append(buffer, LocaleFactory.localizedString("Unknown application error"));

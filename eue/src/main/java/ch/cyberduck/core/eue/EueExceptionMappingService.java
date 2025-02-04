@@ -53,6 +53,7 @@ public class EueExceptionMappingService extends AbstractExceptionMappingService<
 
     @Override
     public BackgroundException map(final ApiException failure) {
+        log.warn("Map failure {}", failure.toString());
         final StringBuilder buffer = new StringBuilder();
         if(StringUtils.isNotBlank(failure.getMessage())) {
             for(String s : StringUtils.split(failure.getMessage(), ",")) {

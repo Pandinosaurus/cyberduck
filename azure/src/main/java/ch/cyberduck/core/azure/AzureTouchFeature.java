@@ -33,13 +33,8 @@ import com.microsoft.azure.storage.OperationContext;
 
 public class AzureTouchFeature extends DefaultTouchFeature<Void> {
 
-    private final AzureSession session;
-    private final OperationContext context;
-
     public AzureTouchFeature(final AzureSession session, final OperationContext context) {
         super(new AzureWriteFeature(session, context));
-        this.session = session;
-        this.context = context;
     }
 
     @Override
@@ -52,6 +47,6 @@ public class AzureTouchFeature extends DefaultTouchFeature<Void> {
     @Override
     public Path touch(final Path file, final TransferStatus status) throws BackgroundException {
         status.setChecksum(write.checksum(file, status).compute(new NullInputStream(0L), status));
-        return super.touch(file, status).withAttributes(new AzureAttributesFinderFeature(session, context).find(file));
+        return super.touch(file, status);
     }
 }

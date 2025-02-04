@@ -42,6 +42,7 @@ public class GoogleStorageExceptionMappingService extends DefaultIOExceptionMapp
 
     @Override
     public BackgroundException map(final IOException failure) {
+        log.warn("Map failure {}", failure.toString());
         final StringBuilder buffer = new StringBuilder();
         if(failure instanceof GoogleJsonResponseException) {
             final GoogleJsonResponseException error = (GoogleJsonResponseException) failure;
@@ -76,7 +77,7 @@ public class GoogleStorageExceptionMappingService extends DefaultIOExceptionMapp
      * @param response Error response with JSON body
      * @return Error message parsed from error key
      */
-    public String parse(final HttpResponse response) {
+    public static String parse(final HttpResponse response) {
         if(response.getEntity() != null) {
             try (JsonParser parser = new GsonFactory().createJsonParser(response.getEntity().getContent())) {
                 JsonToken currentToken = parser.getCurrentToken();
@@ -106,7 +107,7 @@ public class GoogleStorageExceptionMappingService extends DefaultIOExceptionMapp
             }
             catch(IOException exception) {
                 // it would be bad to throw an exception while throwing an exception
-                log.warn(String.format("Ignore failure %s parsing error reply from %s", exception, response));
+                log.warn("Ignore failure {} parsing error reply from {}", exception, response);
             }
         }
         return response.getStatusLine().getReasonPhrase();

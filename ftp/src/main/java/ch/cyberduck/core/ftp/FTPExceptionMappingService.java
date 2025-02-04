@@ -27,16 +27,21 @@ import ch.cyberduck.core.exception.LoginFailureException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.exception.QuotaException;
 
+import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.net.MalformedServerReplyException;
 import org.apache.commons.net.ftp.FTPConnectionClosedException;
 import org.apache.commons.net.ftp.FTPReply;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
 
 public class FTPExceptionMappingService extends AbstractExceptionMappingService<IOException> {
+    private static final Logger log = LogManager.getLogger(FTPExceptionMappingService.class);
 
     @Override
     public BackgroundException map(final IOException e) {
+        log.warn("Map failure {}", e.toString());
         final StringBuilder buffer = new StringBuilder();
         this.append(buffer, e.getMessage());
         if(e instanceof FTPConnectionClosedException) {
@@ -63,9 +68,13 @@ public class FTPExceptionMappingService extends AbstractExceptionMappingService<
             case FTPReply.DENIED_FOR_POLICY_REASONS:
             case FTPReply.NEED_ACCOUNT:
             case FTPReply.NEED_ACCOUNT_FOR_STORING_FILES:
-            case FTPReply.FILE_NAME_NOT_ALLOWED:
             case FTPReply.FILE_ACTION_NOT_TAKEN:
             case FTPReply.ACTION_ABORTED:
+                return new AccessDeniedException(buffer.toString(), e);
+            case FTPReply.FILE_NAME_NOT_ALLOWED:
+                if(StringUtils.contains(e.getMessage(), "No such file")) {
+                    return new NotfoundException(buffer.toString(), e);
+                }
                 return new AccessDeniedException(buffer.toString(), e);
             case FTPReply.UNAVAILABLE_RESOURCE:
             case FTPReply.FILE_UNAVAILABLE:

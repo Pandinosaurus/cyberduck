@@ -42,102 +42,100 @@ public class BackgroundCallable<T> implements Callable<T> {
         this.controller = controller;
     }
 
+    public boolean init() {
+        try {
+            action.init();
+            return true;
+        }
+        catch(BackgroundException e) {
+            action.alert(e);
+            log.debug("Invoke cleanup for background action {}", action);
+            this.cleanup(null, e);
+            return false;
+        }
+    }
+
+    private void cleanup(final T result, final BackgroundException failure) {
+        // Invoke the cleanup on the main thread to let the action synchronize the user interface
+        controller.invoke(new ControllerMainAction(controller) {
+            @Override
+            public void run() {
+                try {
+                    action.cleanup(result, failure);
+                }
+                catch(Exception e) {
+                    log.error(String.format("Exception %s running cleanup task", e), e);
+                }
+            }
+        });
+    }
+
     @Override
     public T call() {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Running background action %s", action));
-        }
+        log.debug("Running background action {}", action);
         final ActionOperationBatcher autorelease = ActionOperationBatcherFactory.get();
         if(action.isCanceled()) {
             // Canceled action yields no result
             return null;
         }
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Prepare background action %s", action));
-        }
+        log.debug("Prepare background action {}", action);
         action.prepare();
+        T result = null;
+        BackgroundException failure = null;
         try {
-            final T result = this.run();
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Return result %s from background action %s", result, action));
-            }
+            result = this.run();
+            log.debug("Return result {} from background action {}", result, action);
             return result;
+        }
+        catch(BackgroundException e) {
+            failure = e;
+            // Failed action yields no result
+            return null;
         }
         finally {
             action.finish();
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Invoke cleanup for background action %s", action));
-            }
+            log.debug("Invoke cleanup for background action {}", action);
             // Invoke the cleanup on the main thread to let the action synchronize the user interface
-            controller.invoke(new ControllerMainAction(controller) {
-                @Override
-                public void run() {
-                    try {
-                        action.cleanup();
-                    }
-                    catch(Exception e) {
-                        log.error(String.format("Exception %s running cleanup task", e), e);
-                    }
-                }
-            });
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Releasing lock for background runnable %s", action));
-            }
+            this.cleanup(result, failure);
+            log.debug("Releasing lock for background runnable {}", action);
             autorelease.operate();
         }
     }
 
-    protected T run() {
+    protected T run() throws BackgroundException {
         try {
             // Execute the action of the runnable
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Call background action %s", action));
-            }
+            log.debug("Call background action {}", action);
             return action.call();
         }
-        catch(BackgroundException e) {
-            this.failure(client, e);
-            // If there was any failure, display the summary now
-            if(action.alert(e)) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Retry background action %s", action));
-                }
-                // Retry
-                return this.run();
-            }
-            // Failed action yields no result
-            return null;
-        }
-        catch(Exception e) {
+        catch(Throwable e) {
             this.failure(client, e);
             // Runtime failure
-            if(action.alert(new DefaultExceptionMappingService().map(e))) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Retry background action %s", action));
-                }
+            final BackgroundException failure = new DefaultExceptionMappingService().map(e);
+            if(action.alert(failure)) {
+                log.debug("Retry background action {}", action);
                 // Retry
                 return this.run();
             }
-            // Failed action yields no result
-            return null;
+            throw failure;
         }
     }
 
-    protected void failure(final Exception trace, final Exception failure) {
+    protected void failure(final Exception trace, final Throwable failure) {
         try {
             trace.initCause(failure);
         }
         catch(IllegalStateException e) {
-            log.warn(String.format("Failure overwriting cause for failure %s with %s", trace, failure));
+            log.warn("Failure overwriting cause for failure {} with {}", trace, failure);
         }
         if(failure instanceof ConnectionCanceledException) {
-            log.debug(String.format("Canceled running background task %s", action), trace);
+            log.debug("Canceled running background task {}", action, trace);
         }
         else if(failure instanceof UnsupportedException) {
-            log.debug(String.format("Unsupported running background task %s", action), trace);
+            log.debug("Unsupported running background task {}", action, trace);
         }
         else {
-            log.warn(String.format("Failure running background task %s", action), trace);
+            log.warn("Failure running background task {}", action, trace);
         }
     }
 }

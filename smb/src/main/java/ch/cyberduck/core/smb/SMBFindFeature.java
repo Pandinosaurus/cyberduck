@@ -21,10 +21,7 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.NotfoundException;
 import ch.cyberduck.core.features.Find;
 
-import java.io.IOException;
-
 import com.hierynomus.smbj.common.SMBRuntimeException;
-import com.hierynomus.smbj.share.DiskShare;
 
 public class SMBFindFeature implements Find {
 
@@ -40,23 +37,21 @@ public class SMBFindFeature implements Find {
             return true;
         }
         try {
-            try (final DiskShare share = session.openShare(file)) {
+            final SMBSession.DiskShareWrapper share = session.openShare(file);
+            try {
                 if(new SMBPathContainerService(session).isContainer(file)) {
                     return true;
                 }
                 if(file.isDirectory()) {
-                    return share.folderExists(new SMBPathContainerService(session).getKey(file));
+                    return share.get().folderExists(new SMBPathContainerService(session).getKey(file));
                 }
-                return share.fileExists(new SMBPathContainerService(session).getKey(file));
-            }
-            catch(IOException e) {
-                throw new SMBTransportExceptionMappingService().map("Cannot read container configuration", e);
+                return share.get().fileExists(new SMBPathContainerService(session).getKey(file));
             }
             catch(SMBRuntimeException e) {
                 throw new SMBExceptionMappingService().map("Failure to read attributes of {0}", e, file);
             }
             finally {
-                session.releaseShare(file);
+                session.releaseShare(share);
             }
         }
         catch(NotfoundException e) {

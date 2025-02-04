@@ -26,15 +26,14 @@ import ch.cyberduck.core.exception.BackgroundException;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.io.IOException;
 import java.util.Collections;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Set;
 
 import com.hierynomus.msfscc.FileAttributes;
 import com.hierynomus.msfscc.fileinformation.FileIdBothDirectoryInformation;
 import com.hierynomus.smbj.common.SMBRuntimeException;
-import com.hierynomus.smbj.share.DiskShare;
 
 public class SMBListService implements ListService {
     private static final Logger log = LogManager.getLogger(SMBListService.class);
@@ -52,13 +51,19 @@ public class SMBListService implements ListService {
     @Override
     public AttributedList<Path> list(final Path directory, final ListProgressListener listener) throws BackgroundException {
         final AttributedList<Path> result = new AttributedList<>();
-        try (final DiskShare share = session.openShare(directory)) {
-            for(FileIdBothDirectoryInformation f : share.list(new SMBPathContainerService(session).getKey(directory))) {
+        try {
+            final SMBSession.DiskShareWrapper share = session.openShare(directory);
+            final List<FileIdBothDirectoryInformation> info;
+            try {
+                info = share.get().list(new SMBPathContainerService(session).getKey(directory));
+            }
+            finally {
+                session.releaseShare(share);
+            }
+            for(FileIdBothDirectoryInformation f : info) {
                 final String filename = f.getFileName();
                 if(filename.equals(".") || filename.equals("..")) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Skip %s", f.getFileName()));
-                    }
+                    log.debug("Skip {}", f.getFileName());
                     continue;
                 }
                 final EnumSet<Type> type = EnumSet.noneOf(Type.class);
@@ -77,20 +82,11 @@ public class SMBListService implements ListService {
                 attr.setSize(f.getEndOfFile());
                 attr.setDisplayname(f.getFileName());
                 result.add(new Path(directory, filename, type, attr));
-                listener.chunk(directory, result);
             }
-            if(result.isEmpty()) {
-                listener.chunk(directory, result);
-            }
+            listener.chunk(directory, result);
         }
         catch(SMBRuntimeException e) {
             throw new SMBExceptionMappingService().map("Listing directory {0} failed", e, directory);
-        }
-        catch(IOException e) {
-            throw new SMBTransportExceptionMappingService().map("Cannot read container configuration", e);
-        }
-        finally {
-            session.releaseShare(directory);
         }
         return result;
     }

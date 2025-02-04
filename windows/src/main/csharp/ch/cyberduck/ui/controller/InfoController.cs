@@ -52,6 +52,7 @@ using System.Windows.Forms;
 using static Ch.Cyberduck.ImageHelper;
 using Boolean = java.lang.Boolean;
 using Object = System.Object;
+using Optional = java.util.Optional;
 using String = System.String;
 using StringBuilder = System.Text.StringBuilder;
 
@@ -108,6 +109,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
                 _files = value;
 
+                View.Filename = Name;
                 ConfigureToolbar();
                 ConfigureHelp();
                 InitTab(View.ActiveTab);
@@ -183,7 +185,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             if (View.Versions.ViewModel is not VersionsViewModel viewModel)
             {
-                viewModel = new VersionsViewModel(_controller, _controller.Session);
+                viewModel = new VersionsViewModel(_controller, _controller.Pool);
                 View.Versions.ViewModel = viewModel;
                 viewModel.PromptDelete.RegisterHandler(c => c.SetOutput(_controller.DeletePathsPrompt(c.Input)));
                 viewModel.Reverted += Versions_Reverted;
@@ -199,7 +201,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
         private void ConfigureToolbar()
         {
-            SessionPool session = _controller.Session;
+            SessionPool session = _controller.Pool;
             bool anonymous = session.getHost().getCredentials().isAnonymousLogin();
 
             View.ToolbarS3Label = session.getHost().getProtocol().getName();
@@ -265,7 +267,7 @@ namespace Ch.Cyberduck.Ui.Controller
                 bool metadataAvailable = feature != null;
                 if (metadataAvailable && View.MetadataViewModel is not MetadataViewModel viewModel)
                 {
-                    View.MetadataViewModel = viewModel = new(feature, _controller, _controller.Session);
+                    View.MetadataViewModel = viewModel = new(feature, _controller, _controller.Pool);
                     viewModel.Recurse.RegisterHandler(c =>
                     {
                         DialogRecursiveCallback dialog = new(this);
@@ -348,7 +350,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
         private void PopulateAclUsers()
         {
-            AclPermission feature = (AclPermission)_controller.Session.getFeature(typeof(AclPermission));
+            AclPermission feature = (AclPermission)_controller.Pool.getFeature(typeof(AclPermission));
             IDictionary<string, SyncDelegate> mapping = new Dictionary<string, SyncDelegate>();
             List aclUsers = feature.getAvailableAclUsers();
             for (int i = 0; i < aclUsers.size(); i++)
@@ -362,7 +364,7 @@ namespace Ch.Cyberduck.Ui.Controller
 
         private void PopulateAclRoles()
         {
-            AclPermission feature = (AclPermission)_controller.Session.getFeature(typeof(AclPermission));
+            AclPermission feature = (AclPermission)_controller.Pool.getFeature(typeof(AclPermission));
             IList<string> roles = Utils.ConvertFromJavaList(
                 feature.getAvailableAclRoles(Utils.ConvertToJavaList(Files)), item => ((Acl.Role)item).getName());
             View.PopulateAclRoles(roles);
@@ -404,7 +406,7 @@ namespace Ch.Cyberduck.Ui.Controller
         /// <returns>True if progress animation has started and settings are toggled</returns>
         private bool ToggleAclSettings(bool stop)
         {
-            SessionPool session = _controller.Session;
+            SessionPool session = _controller.Pool;
             Credentials credentials = session.getHost().getCredentials();
             bool enable = !credentials.isAnonymousLogin() && session.getFeature(typeof(AclPermission)) != null;
             View.AclTableEnabled = stop && enable;
@@ -496,7 +498,7 @@ namespace Ch.Cyberduck.Ui.Controller
         /// <returns>True if controls are enabled for the given protocol in idle state</returns>
         private bool ToggleDistributionSettings(bool stop)
         {
-            SessionPool session = _controller.Session;
+            SessionPool session = _controller.Pool;
             Credentials credentials = session.getHost().getCredentials();
             DistributionConfiguration cdn =
                 (DistributionConfiguration)session.getFeature(typeof(DistributionConfiguration));
@@ -817,10 +819,9 @@ namespace Ch.Cyberduck.Ui.Controller
                 DetachGeneralHandlers();
 
                 Path file = _files[0];
-                View.Filename = Name;
-
+                //todo
                 View.FilenameEnabled = (1 == count &&
-                                        ((Move)_controller.Session.getFeature(typeof(Move))).isSupported(file, file));
+                                        ((Move)_controller.Pool.getFeature(typeof(Move))).isSupported(file, Optional.empty()));
                 string path;
                 if (file.isSymbolicLink())
                 {
@@ -925,7 +926,7 @@ namespace Ch.Cyberduck.Ui.Controller
         /// <param name="stop">Enable controls and stop progress spinner</param>
         private bool ToggleS3Settings(bool stop)
         {
-            SessionPool session = _controller.Session;
+            SessionPool session = _controller.Pool;
             Credentials credentials = session.getHost().getCredentials();
             bool enable = session.getHost().getProtocol().getType() == Protocol.Type.s3 ||
                           session.getHost().getProtocol().getType() == Protocol.Type.b2 ||
@@ -1000,7 +1001,7 @@ namespace Ch.Cyberduck.Ui.Controller
                 new KeyValuePair<string, string>(LocaleFactory.localizedString("None"), String.Empty)
             });
 
-            SessionPool session = _controller.Session;
+            SessionPool session = _controller.Pool;
             DistributionConfiguration cdn =
                 (DistributionConfiguration)session.getFeature(typeof(DistributionConfiguration));
             View.DistributionTitle = String.Format(LocaleFactory.localizedString("Enable {0} Distribution", "Status"),
@@ -1051,7 +1052,7 @@ namespace Ch.Cyberduck.Ui.Controller
             {
                 DetachPermissionHandlers();
             }
-            SessionPool session = _controller.Session;
+            SessionPool session = _controller.Pool;
             Credentials credentials = session.getHost().getCredentials();
             bool enable = !credentials.isAnonymousLogin() && session.getFeature(typeof(UnixPermission)) != null;
             View.RecursivePermissionsEnabled = stop && enable;
@@ -1096,7 +1097,7 @@ namespace Ch.Cyberduck.Ui.Controller
             else
             {
                 DescriptiveUrl http =
-                    ((UrlProvider)_controller.Session.getFeature(typeof(UrlProvider))).toUrl(SelectedPath)
+                    ((UrlProvider)_controller.Pool.getFeature(typeof(UrlProvider))).toUrl(SelectedPath)
                         .find(DescriptiveUrl.Type.http);
                 if (!http.Equals(DescriptiveUrl.EMPTY))
                 {
@@ -1275,7 +1276,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public FetchPermissionsBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerReadPermissionWorker(infoController, Utils.ConvertToJavaList(infoController._files)))
             {
             }
@@ -1452,6 +1453,10 @@ namespace Ch.Cyberduck.Ui.Controller
                     {
                         Log.warn("Ignore failure reading transfer acceleration", ex);
                     }
+                    catch (ConflictException ex)
+                    {
+                        Log.warn("Ignore failure reading transfer acceleration", ex);
+                    }
                 }
                 return true;
             }
@@ -1551,7 +1556,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public InvalidateObjectsBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerDistributionPurgeWorker(infoController, Utils.ConvertToJavaList(infoController.Files),
                         infoController._prompt, infoController.View.DistributionDeliveryMethod))
             {
@@ -1579,7 +1584,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public LifecycleBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWriteLifecycleWorker(infoController, Utils.ConvertToJavaList(infoController.Files),
                         new LifecycleConfiguration(
                             infoController.View.LifecycleTransitionCheckbox
@@ -1614,7 +1619,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public ReadAclBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerReadAclWorker(browserController, infoController,
                         Utils.ConvertToJavaList(infoController._files)))
             {
@@ -1647,7 +1652,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public ReadDistributionBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerReadDistributionWorker(infoController, browserController,
                         Utils.ConvertToJavaList(infoController.Files), infoController._prompt,
                         infoController.View.DistributionDeliveryMethod))
@@ -1806,7 +1811,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public ReadSizeBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerReadSizeWorker(infoController, Utils.ConvertToJavaList(infoController._files)))
             {
             }
@@ -1834,7 +1839,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public RecursiveSizeAction(BrowserController controller, InfoController infoController, IList<Path> files)
                 : base(
-                    controller, controller.Session,
+                    controller, controller.Pool,
                     new InnerCalculateSizeWorker(infoController, Utils.ConvertToJavaList(files)))
             {
             }
@@ -1867,7 +1872,7 @@ namespace Ch.Cyberduck.Ui.Controller
             public SetTransferAccelerationBackgroundAction(BrowserController browserController,
                 InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWriteTransferAccelerationWorker(infoController,
                         Utils.ConvertToJavaList(infoController.Files), infoController.View.TransferAccelerationCheckbox)
                 )
@@ -1895,7 +1900,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public SetBucketLoggingBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWriteLoggingWorker(infoController, Utils.ConvertToJavaList(infoController.Files),
                         new LoggingConfiguration(infoController.View.BucketLoggingCheckbox,
                             infoController.View.BucketLoggingPopup)))
@@ -1925,7 +1930,7 @@ namespace Ch.Cyberduck.Ui.Controller
             public SetBucketVersioningAndMfaBackgroundAction(BrowserController browserController,
                 InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWriteVersioningWorker(infoController, Utils.ConvertToJavaList(infoController.Files),
                         infoController._prompt,
                         new VersioningConfiguration(infoController.View.BucketVersioning, infoController.View.BucketMfa))
@@ -1955,7 +1960,7 @@ namespace Ch.Cyberduck.Ui.Controller
             public SetEncryptionBackgroundAction(BrowserController controller, InfoController infoController,
                 IList<Path> files, Encryption.Algorithm algorithm)
                 : base(
-                    controller, controller.Session,
+                    controller, controller.Pool,
                     new InnerWriteEncryptionWorker(controller, infoController, Utils.ConvertToJavaList(files), algorithm)
                 )
             {
@@ -1985,7 +1990,7 @@ namespace Ch.Cyberduck.Ui.Controller
             public SetStorageClassBackgroundAction(BrowserController controller, InfoController infoController,
                 IList<Path> files, String redundancy)
                 : base(
-                    controller, controller.Session,
+                    controller, controller.Pool,
                     new InnerWriteRedundancyWorker(controller, infoController, Utils.ConvertToJavaList(files),
                         redundancy))
             {
@@ -2051,7 +2056,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public WriteAclBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWriteAclWorker(browserController, infoController,
                         Utils.ConvertToJavaList(infoController._files), GetAcl(infoController)))
             {
@@ -2091,7 +2096,7 @@ namespace Ch.Cyberduck.Ui.Controller
         {
             public WriteDistributionBackgroundAction(BrowserController browserController, InfoController infoController)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWriteDistributionWorker(infoController, Utils.ConvertToJavaList(infoController.Files),
                         infoController._prompt, GetDistribution(infoController.View)))
             {
@@ -2132,7 +2137,7 @@ namespace Ch.Cyberduck.Ui.Controller
             public WritePermissionBackgroundAction(BrowserController browserController, InfoController infoController,
                 bool recursive)
                 : base(
-                    browserController, browserController.Session,
+                    browserController, browserController.Pool,
                     new InnerWritePermissionWorker(infoController, Utils.ConvertToJavaList(infoController._files),
                         recursive
                             ? (Worker.RecursiveCallback)new DialogRecursiveCallback(infoController)

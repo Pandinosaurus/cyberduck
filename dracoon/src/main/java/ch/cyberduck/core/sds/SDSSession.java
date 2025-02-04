@@ -15,46 +15,26 @@ package ch.cyberduck.core.sds;
  * GNU General Public License for more details.
  */
 
-import ch.cyberduck.core.ConnectionTimeoutFactory;
-import ch.cyberduck.core.Credentials;
-import ch.cyberduck.core.DefaultIOExceptionMappingService;
-import ch.cyberduck.core.ExpiringObjectHolder;
-import ch.cyberduck.core.Host;
-import ch.cyberduck.core.HostKeyCallback;
-import ch.cyberduck.core.HostUrlProvider;
-import ch.cyberduck.core.ListService;
-import ch.cyberduck.core.LocaleFactory;
-import ch.cyberduck.core.LoginCallback;
-import ch.cyberduck.core.PreferencesUseragentProvider;
-import ch.cyberduck.core.Scheme;
-import ch.cyberduck.core.UrlProvider;
-import ch.cyberduck.core.Version;
+import ch.cyberduck.core.*;
+import ch.cyberduck.core.cache.LRUCache;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InteroperabilityException;
 import ch.cyberduck.core.exception.LoginCanceledException;
 import ch.cyberduck.core.features.*;
-import ch.cyberduck.core.http.HttpSession;
+import ch.cyberduck.core.http.*;
 import ch.cyberduck.core.jersey.HttpComponentsProvider;
 import ch.cyberduck.core.oauth.OAuth2AuthorizationService;
 import ch.cyberduck.core.oauth.OAuth2ErrorResponseInterceptor;
 import ch.cyberduck.core.oauth.OAuth2RequestInterceptor;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.preferences.PreferencesReader;
-import ch.cyberduck.core.proxy.Proxy;
+import ch.cyberduck.core.proxy.ProxyFinder;
 import ch.cyberduck.core.sds.io.swagger.client.ApiException;
 import ch.cyberduck.core.sds.io.swagger.client.JSON;
 import ch.cyberduck.core.sds.io.swagger.client.api.ConfigApi;
 import ch.cyberduck.core.sds.io.swagger.client.api.PublicApi;
 import ch.cyberduck.core.sds.io.swagger.client.api.UserApi;
-import ch.cyberduck.core.sds.io.swagger.client.model.AlgorithmVersionInfo;
-import ch.cyberduck.core.sds.io.swagger.client.model.AlgorithmVersionInfoList;
-import ch.cyberduck.core.sds.io.swagger.client.model.ClassificationPoliciesConfig;
-import ch.cyberduck.core.sds.io.swagger.client.model.CreateKeyPairRequest;
-import ch.cyberduck.core.sds.io.swagger.client.model.GeneralSettingsInfo;
-import ch.cyberduck.core.sds.io.swagger.client.model.SoftwareVersionData;
-import ch.cyberduck.core.sds.io.swagger.client.model.SystemDefaults;
-import ch.cyberduck.core.sds.io.swagger.client.model.UserAccount;
-import ch.cyberduck.core.sds.io.swagger.client.model.UserKeyPairContainer;
+import ch.cyberduck.core.sds.io.swagger.client.model.*;
 import ch.cyberduck.core.sds.triplecrypt.TripleCryptConverter;
 import ch.cyberduck.core.sds.triplecrypt.TripleCryptExceptionMappingService;
 import ch.cyberduck.core.sds.triplecrypt.TripleCryptKeyPair;
@@ -62,13 +42,17 @@ import ch.cyberduck.core.shared.DefaultUploadFeature;
 import ch.cyberduck.core.ssl.X509KeyManager;
 import ch.cyberduck.core.ssl.X509TrustManager;
 import ch.cyberduck.core.threading.CancelCallback;
-
+import com.dracoon.sdk.crypto.Crypto;
+import com.dracoon.sdk.crypto.error.CryptoException;
+import com.dracoon.sdk.crypto.error.UnknownVersionException;
+import com.dracoon.sdk.crypto.model.EncryptedFileKey;
+import com.dracoon.sdk.crypto.model.UserKeyPair;
+import com.google.common.cache.RemovalListener;
+import com.google.common.cache.RemovalNotification;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.http.HttpException;
-import org.apache.http.HttpHeaders;
-import org.apache.http.HttpRequest;
-import org.apache.http.HttpRequestInterceptor;
-import org.apache.http.HttpStatus;
+import org.apache.commons.lang3.builder.EqualsBuilder;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+import org.apache.http.*;
 import org.apache.http.client.methods.HttpRequestWrapper;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
@@ -86,16 +70,10 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-
-import com.dracoon.sdk.crypto.Crypto;
-import com.dracoon.sdk.crypto.error.CryptoException;
-import com.dracoon.sdk.crypto.error.UnknownVersionException;
-import com.dracoon.sdk.crypto.model.EncryptedFileKey;
-import com.dracoon.sdk.crypto.model.UserKeyPair;
-import com.migcomponents.migbase64.Base64;
 
 import static ch.cyberduck.core.oauth.OAuth2AuthorizationService.CYBERDUCK_REDIRECT_URI;
 
@@ -120,6 +98,9 @@ public class SDSSession extends HttpSession<SDSApiClient> {
     private final ExpiringObjectHolder<UserKeyPairContainer> keyPairDeprecated
             = new ExpiringObjectHolder<>(preferences.getLong("sds.encryption.keys.ttl"));
 
+    private final ExpiringObjectHolder<Credentials> keyPairPassphrase
+            = new ExpiringObjectHolder<>(preferences.getLong("sds.encryption.keys.ttl"));
+
     private final ExpiringObjectHolder<SystemDefaults> systemDefaults
             = new ExpiringObjectHolder<>(preferences.getLong("sds.useracount.ttl"));
 
@@ -132,18 +113,27 @@ public class SDSSession extends HttpSession<SDSApiClient> {
     private final ExpiringObjectHolder<SoftwareVersionData> softwareVersion
             = new ExpiringObjectHolder<>(preferences.getLong("sds.useracount.ttl"));
 
+    private final LRUCache<KeyPairCacheReference, Credentials> keyPairPassphrases
+            = LRUCache.build(new RemovalListener<KeyPairCacheReference, Credentials>() {
+        @Override
+        public void onRemoval(final RemovalNotification<KeyPairCacheReference, Credentials> notification) {
+            //
+        }
+    }, 2, preferences.getLong("sds.encryption.keys.ttl"), false);
+
     private UserKeyPair.Version requiredKeyPairVersion;
 
     private final SDSNodeIdProvider nodeid = new SDSNodeIdProvider(this);
+    private final SDSMissingFileKeysSchedulerFeature scheduler = new SDSMissingFileKeysSchedulerFeature(this, nodeid);
 
     public SDSSession(final Host host, final X509TrustManager trust, final X509KeyManager key) {
         super(host, trust, key);
     }
 
     @Override
-    protected SDSApiClient connect(final Proxy proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    protected SDSApiClient connect(final ProxyFinder proxy, final HostKeyCallback key, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         final HttpClientBuilder configuration = builder.build(proxy, this, prompt);
-        authorizationService = new OAuth2RequestInterceptor(builder.build(proxy, this, prompt).addInterceptorLast(new HttpRequestInterceptor() {
+        authorizationService = new OAuth2RequestInterceptor(configuration.addInterceptorLast(new HttpRequestInterceptor() {
             @Override
             public void process(final HttpRequest request, final HttpContext context) {
                 if(request instanceof HttpRequestWrapper) {
@@ -151,7 +141,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                     if(null != wrapper.getTarget()) {
                         if(StringUtils.equals(wrapper.getTarget().getHostName(), host.getHostname())) {
                             request.addHeader(HttpHeaders.AUTHORIZATION,
-                                    String.format("Basic %s", Base64.encodeToString(String.format("%s:%s", host.getProtocol().getOAuthClientId(), host.getProtocol().getOAuthClientSecret()).getBytes(StandardCharsets.UTF_8), false)));
+                                    String.format("Basic %s", Base64.getEncoder().encodeToString(String.format("%s:%s", host.getProtocol().getOAuthClientId(), host.getProtocol().getOAuthClientSecret()).getBytes(StandardCharsets.UTF_8))));
                         }
                     }
                 }
@@ -176,13 +166,20 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                                 host.getProtocol().getScheme(), host.getPort(), null, host.getHostname(), host.getProtocol().getOAuthRedirectUrl())
                 );
         try {
-            authorizationService.withParameter("user_agent_info", Base64.encodeToString(InetAddress.getLocalHost().getHostName().getBytes(StandardCharsets.UTF_8), false));
+            authorizationService.withParameter("user_agent_info", Base64.getEncoder().encodeToString(InetAddress.getLocalHost().getHostName().getBytes(StandardCharsets.UTF_8)));
         }
         catch(UnknownHostException e) {
             throw new DefaultIOExceptionMappingService().map(e);
         }
-        configuration.setServiceUnavailableRetryStrategy(new PreconditionFailedResponseInterceptor(host, authorizationService, prompt,
-                new OAuth2ErrorResponseInterceptor(host, authorizationService)));
+        configuration.setServiceUnavailableRetryStrategy(new CustomServiceUnavailableRetryStrategy(host,
+
+                new ExecutionCountServiceUnavailableRetryStrategy(new PreconditionFailedResponseInterceptor(host, authorizationService, prompt),
+                        new OAuth2ErrorResponseInterceptor(host, authorizationService))));
+        if(new HostPreferences(host).getBoolean("sds.limit.requests.enable")) {
+            configuration.addInterceptorLast(new RateLimitingHttpRequestInterceptor(new DefaultHttpRateLimiter(
+                    new HostPreferences(host).getInteger("sds.limit.requests.second")
+            )));
+        }
         configuration.addInterceptorLast(authorizationService);
         configuration.addInterceptorLast(new HttpRequestInterceptor() {
             @Override
@@ -209,7 +206,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
     }
 
     @Override
-    public void login(final Proxy proxy, final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
+    public void login(final LoginCallback prompt, final CancelCallback cancel) throws BackgroundException {
         final SoftwareVersionData version = this.softwareVersion();
         final Matcher matcher = Pattern.compile(VERSION_REGEX).matcher(version.getRestApiVersion());
         if(matcher.matches()) {
@@ -231,7 +228,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                         }
                     }
                     else {
-                        log.warn(String.format("Failure to parse software version %s", version));
+                        log.warn("Failure to parse software version {}", version);
                     }
                 }
                 credentials = authorizationService.validate();
@@ -242,9 +239,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
         final UserAccount account;
         try {
             account = new UserApi(client).requestUserInfo(StringUtils.EMPTY, false, null);
-            if(log.isDebugEnabled()) {
-                log.debug(String.format("Authenticated as user %s", account));
-            }
+            log.debug("Authenticated as user {}", account);
         }
         catch(ApiException e) {
             throw new SDSExceptionMappingService(nodeid).map(e);
@@ -270,7 +265,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             }
         }
         catch(BackgroundException e) {
-            log.warn(String.format("Failure reading software version. %s", e.getMessage()));
+            log.warn("Failure reading software version. {}", e.getMessage());
             isS3DirectUploadSupported = true;
         }
         host.setProperty("sds.upload.s3.enable", String.valueOf(isS3DirectUploadSupported));
@@ -289,10 +284,10 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             log.error("No available key pair algorithm with status required found.");
         }
         catch(ApiException e) {
-            log.warn(String.format("Ignore failure reading key pair version. %s", new SDSExceptionMappingService(nodeid).map(e)));
+            log.warn("Ignore failure reading key pair version. {}", e.getMessage());
         }
         catch(UnknownVersionException e) {
-            log.warn(String.format("Ignore failure reading required key pair algorithm. %s", new TripleCryptExceptionMappingService().map(e)));
+            log.warn("Ignore failure reading required key pair algorithm. {}", e.getMessage());
         }
         return UserKeyPair.Version.RSA2048;
     }
@@ -305,6 +300,32 @@ public class SDSSession extends HttpSession<SDSApiClient> {
         return false;
     }
 
+    public Credentials unlockTripleCryptKeyPair(final PasswordCallback callback, final UserKeyPair keypair) throws BackgroundException {
+        final KeyPairCacheReference reference = new KeyPairCacheReference(keypair);
+        if(!keyPairPassphrases.contains(reference)) {
+            try {
+                keyPairPassphrases.put(reference, new TripleCryptKeyPair().unlock(callback, host, keypair));
+            }
+            catch(CryptoException e) {
+                throw new TripleCryptExceptionMappingService().map(e);
+            }
+        }
+        return keyPairPassphrases.get(reference);
+    }
+
+    public Credentials unlockTripleCryptKeyPair(final PasswordCallback callback, final UserKeyPair keypair, final String passphrase) throws BackgroundException {
+        final KeyPairCacheReference reference = new KeyPairCacheReference(keypair);
+        if(!keyPairPassphrases.contains(reference)) {
+            try {
+                keyPairPassphrases.put(reference, new TripleCryptKeyPair().unlock(callback, host, keypair, passphrase));
+            }
+            catch(CryptoException e) {
+                throw new TripleCryptExceptionMappingService().map(e);
+            }
+        }
+        return keyPairPassphrases.get(reference);
+    }
+
     protected void unlockTripleCryptKeyPair(final LoginCallback prompt, final UserAccountWrapper user,
                                             final UserKeyPair.Version requiredKeyPairVersion) throws BackgroundException {
         try {
@@ -312,9 +333,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             if(this.isNewCryptoAvailable()) {
                 final List<UserKeyPairContainer> pairs = new UserApi(client).requestUserKeyPairs(StringUtils.EMPTY, null);
                 if(pairs.size() == 0) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("No keypair found for user %s", user));
-                    }
+                    log.debug("No keypair found for user {}", user);
                     return;
                 }
                 boolean migrated = false;
@@ -327,28 +346,22 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                 if(migrated && pairs.size() == 2) {
                     final UserKeyPairContainer deprecated = new UserApi(client).requestUserKeyPair(StringUtils.EMPTY, UserKeyPair.Version.RSA2048.getValue(), null);
                     final UserKeyPair keypair = TripleCryptConverter.toCryptoUserKeyPair(deprecated);
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Attempt to unlock deprecated private key %s", keypair.getUserPrivateKey()));
-                    }
-                    deprecatedCredentials = new TripleCryptKeyPair().unlock(prompt, host, keypair);
+                    log.debug("Attempt to unlock deprecated private key {}", keypair.getUserPrivateKey());
+                    deprecatedCredentials = this.unlockTripleCryptKeyPair(prompt, keypair);
                     keyPairDeprecated.set(deprecated);
                 }
                 if(!migrated) {
                     final UserKeyPairContainer deprecated = new UserApi(client).requestUserKeyPair(StringUtils.EMPTY, UserKeyPair.Version.RSA2048.getValue(), null);
                     final UserKeyPair keypair = TripleCryptConverter.toCryptoUserKeyPair(deprecated);
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Attempt to unlock and migrate deprecated private key %s", keypair.getUserPrivateKey()));
-                    }
-                    deprecatedCredentials = new TripleCryptKeyPair().unlock(prompt, host, keypair);
-                    final UserKeyPair newPair = Crypto.generateUserKeyPair(requiredKeyPairVersion, deprecatedCredentials.getPassword());
+                    log.debug("Attempt to unlock and migrate deprecated private key {}", keypair.getUserPrivateKey());
+                    deprecatedCredentials = this.unlockTripleCryptKeyPair(prompt, keypair);
+                    final UserKeyPair newPair = Crypto.generateUserKeyPair(requiredKeyPairVersion, deprecatedCredentials.getPassword().toCharArray());
                     final CreateKeyPairRequest request = new CreateKeyPairRequest();
                     request.setPreviousPrivateKey(deprecated.getPrivateKeyContainer());
                     final UserKeyPairContainer userKeyPairContainer = TripleCryptConverter.toSwaggerUserKeyPairContainer(newPair);
                     request.setPrivateKeyContainer(userKeyPairContainer.getPrivateKeyContainer());
                     request.setPublicKeyContainer(userKeyPairContainer.getPublicKeyContainer());
-                    if(log.isDebugEnabled()) {
-                        log.debug("Create new key pair");
-                    }
+                    log.debug("Create new key pair");
                     new UserApi(client).createAndPreserveUserKeyPair(request, null);
                     keyPairDeprecated.set(deprecated);
                 }
@@ -357,28 +370,24 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             keyPair.set(container);
             final UserKeyPair keypair = TripleCryptConverter.toCryptoUserKeyPair(keyPair.get());
             if(deprecatedCredentials != null) {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Attempt to unlock private key with passphrase from deprecated private key %s", keypair.getUserPrivateKey()));
-                }
-                if(Crypto.checkUserKeyPair(keypair, deprecatedCredentials.getPassword())) {
-                    new TripleCryptKeyPair().unlock(prompt, host, keypair, deprecatedCredentials.getPassword());
+                log.debug("Attempt to unlock private key with passphrase from deprecated private key {}", keypair.getUserPrivateKey());
+                if(Crypto.checkUserKeyPair(keypair, deprecatedCredentials.getPassword().toCharArray())) {
+                    this.unlockTripleCryptKeyPair(prompt, keypair, deprecatedCredentials.getPassword());
                 }
                 else {
-                    new TripleCryptKeyPair().unlock(prompt, host, keypair);
+                    this.unlockTripleCryptKeyPair(prompt, keypair);
                 }
             }
             else {
-                if(log.isDebugEnabled()) {
-                    log.debug(String.format("Attempt to unlock private key %s", keypair.getUserPrivateKey()));
-                }
-                new TripleCryptKeyPair().unlock(prompt, host, keypair);
+                log.debug("Attempt to unlock private key {}", keypair.getUserPrivateKey());
+                this.unlockTripleCryptKeyPair(prompt, keypair);
             }
         }
         catch(CryptoException e) {
             throw new TripleCryptExceptionMappingService().map(e);
         }
         catch(ApiException e) {
-            log.warn(String.format("Ignore failure unlocking user key pair. %s", new SDSExceptionMappingService(nodeid).map(e)));
+            log.warn("Ignore failure unlocking user key pair. {}", e.getMessage());
         }
         catch(LoginCanceledException e) {
             log.warn("Ignore cancel unlocking triple crypt private key pair");
@@ -399,7 +408,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                 userAccount.set(new UserAccountWrapper(new UserApi(client).requestUserInfo(StringUtils.EMPTY, false, null)));
             }
             catch(ApiException e) {
-                log.warn(String.format("Failure updating user info. %s", new SDSExceptionMappingService(nodeid).map(e)));
+                log.warn("Failure updating user info. {}", e.getMessage());
                 throw new SDSExceptionMappingService(nodeid).map(e);
             }
         }
@@ -428,10 +437,10 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             }
             catch(ApiException e) {
                 if(e.getCode() == HttpStatus.SC_NOT_FOUND) {
-                    log.debug(String.format("User does not have a keypair for version %s", UserKeyPair.Version.RSA2048.getValue()));
+                    log.debug("User does not have a keypair for version {}", UserKeyPair.Version.RSA2048.getValue());
                 }
                 else {
-                    log.warn(String.format("Failure updating user key pair. %s", new SDSExceptionMappingService(nodeid).map(e)));
+                    log.warn("Failure updating user key pair. {}", e.getMessage());
                     throw new SDSExceptionMappingService(nodeid).map(e);
                 }
             }
@@ -445,7 +454,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                 keyPair.set(new UserApi(client).requestUserKeyPair(StringUtils.EMPTY, requiredKeyPairVersion.getValue(), null));
             }
             catch(ApiException e) {
-                log.warn(String.format("Failure updating user key pair for required algorithm. %s", e.getMessage()));
+                log.warn("Failure updating user key pair for required algorithm. {}", e.getMessage());
                 // fallback
                 final UserKeyPairContainer keyPairDeprecated = this.keyPairDeprecated();
                 if(null == keyPairDeprecated) {
@@ -461,12 +470,10 @@ public class SDSSession extends HttpSession<SDSApiClient> {
         if(softwareVersion.get() == null) {
             try {
                 softwareVersion.set(new PublicApi(client).requestSoftwareVersion(null));
-                if(log.isInfoEnabled()) {
-                    log.info(String.format("Server version %s", softwareVersion.get()));
-                }
+                log.info("Server version {}", softwareVersion.get());
             }
             catch(ApiException e) {
-                log.warn(String.format("Failure %s updating software version", new SDSExceptionMappingService(nodeid).map(e)));
+                log.warn("Failure {} updating software version", e.getMessage());
                 throw new SDSExceptionMappingService(nodeid).map(e);
             }
         }
@@ -480,7 +487,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             }
             catch(ApiException e) {
                 // Precondition: Right "Config Read" required.
-                log.warn(String.format("Failure %s reading system defaults", new SDSExceptionMappingService(nodeid).map(e)));
+                log.warn("Failure {} reading system defaults", e.getMessage());
                 throw new SDSExceptionMappingService(nodeid).map(e);
             }
         }
@@ -494,7 +501,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
             }
             catch(ApiException e) {
                 // Precondition: Right "Config Read" required.
-                log.warn(String.format("Failure %s reading configuration", new SDSExceptionMappingService(nodeid).map(e)));
+                log.warn("Failure {} reading configuration", e.getMessage());
                 throw new SDSExceptionMappingService(nodeid).map(e);
             }
         }
@@ -511,7 +518,7 @@ public class SDSSession extends HttpSession<SDSApiClient> {
                     }
                     catch(ApiException e) {
                         // Precondition: Right "Config Read" required.
-                        log.warn(String.format("Failure %s reading configuration", new SDSExceptionMappingService(nodeid).map(e)));
+                        log.warn("Failure {} reading configuration", e.getMessage());
                         throw new SDSExceptionMappingService(nodeid).map(e);
                     }
                 }
@@ -524,8 +531,45 @@ public class SDSSession extends HttpSession<SDSApiClient> {
         return requiredKeyPairVersion;
     }
 
+    private static class KeyPairCacheReference {
+
+        private final UserKeyPair keypair;
+
+        public KeyPairCacheReference(final UserKeyPair keypair) {
+            this.keypair = keypair;
+        }
+
+        @Override
+        public boolean equals(final Object o) {
+            if(this == o) {
+                return true;
+            }
+
+            if(o == null || getClass() != o.getClass()) {
+                return false;
+            }
+
+            final KeyPairCacheReference that = (KeyPairCacheReference) o;
+
+            return new EqualsBuilder().append(keypair.getUserPrivateKey().getVersion().getValue(), that.keypair.getUserPrivateKey().getVersion().getValue()).
+                    append(keypair.getUserPrivateKey().getPrivateKey(), that.keypair.getUserPrivateKey().getPrivateKey()).
+                    append(keypair.getUserPublicKey().getVersion().getValue(), that.keypair.getUserPublicKey().getVersion().getValue()).
+                    append(keypair.getUserPrivateKey().getPrivateKey(), that.keypair.getUserPrivateKey().getPrivateKey()).isEquals();
+        }
+
+        @Override
+        public int hashCode() {
+            return new HashCodeBuilder().
+                    append(keypair.getUserPrivateKey().getVersion().getValue()).
+                    append(keypair.getUserPrivateKey().getPrivateKey()).
+                    append(keypair.getUserPublicKey().getVersion().getValue()).
+                    append(keypair.getUserPrivateKey().getPrivateKey()).toHashCode();
+        }
+    }
+
     @Override
     protected void logout() {
+        scheduler.shutdown(false);
         client.getHttpClient().close();
         nodeid.clear();
     }
@@ -598,6 +642,9 @@ public class SDSSession extends HttpSession<SDSApiClient> {
         }
         if(type == Encryptor.class) {
             return (T) new SDSTripleCryptEncryptorFeature(this, nodeid);
+        }
+        if(type == Scheduler.class) {
+            return (T) scheduler;
         }
         return super._getFeature(type);
     }

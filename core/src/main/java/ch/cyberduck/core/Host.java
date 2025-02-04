@@ -160,6 +160,14 @@ public class Host implements Serializable, Comparable<Host> {
 
     /**
      * @param protocol    Scheme
+     * @param credentials Login credentials
+     */
+    public Host(final Protocol protocol, final Credentials credentials) {
+        this(protocol, protocol.getDefaultHostname(), credentials);
+    }
+
+    /**
+     * @param protocol    Scheme
      * @param hostname    The hostname of the server
      * @param credentials Login credentials
      */
@@ -405,7 +413,7 @@ public class Host implements Serializable, Comparable<Host> {
      * @param hostname Server
      */
     public void setHostname(final String hostname) {
-        this.hostname = hostname.trim();
+        this.hostname = StringUtils.trim(hostname);
     }
 
     /**

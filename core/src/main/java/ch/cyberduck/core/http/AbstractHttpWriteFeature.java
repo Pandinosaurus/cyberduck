@@ -24,12 +24,13 @@ import ch.cyberduck.core.concurrency.Interruptibles;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.features.AttributesAdapter;
-import ch.cyberduck.core.shared.AppendWriteFeature;
+import ch.cyberduck.core.preferences.PreferencesFactory;
 import ch.cyberduck.core.threading.NamedThreadFactory;
 import ch.cyberduck.core.transfer.TransferStatus;
 import ch.cyberduck.core.worker.DefaultExceptionMappingService;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.entity.BufferedHttpEntity;
 import org.apache.http.message.BasicHeader;
 import org.apache.http.protocol.HTTP;
 import org.apache.logging.log4j.LogManager;
@@ -39,7 +40,7 @@ import java.io.OutputStream;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadFactory;
 
-public abstract class AbstractHttpWriteFeature<R> extends AppendWriteFeature<R> implements HttpWriteFeature<R> {
+public abstract class AbstractHttpWriteFeature<R> implements HttpWriteFeature<R> {
     private static final Logger log = LogManager.getLogger(AbstractHttpWriteFeature.class);
 
     private final AttributesAdapter<R> attributes;
@@ -68,12 +69,13 @@ public abstract class AbstractHttpWriteFeature<R> extends AppendWriteFeature<R> 
     @Override
     public HttpResponseOutputStream<R> write(final Path file, final TransferStatus status,
                                              final DelayedHttpEntityCallable<R> command) throws BackgroundException {
-        return this.write(file, status, command, new DelayedHttpEntity() {
+        final DelayedHttpEntity entity = new DelayedHttpEntity() {
             @Override
             public long getContentLength() {
                 return command.getContentLength();
             }
-        });
+        };
+        return this.write(file, status, command, entity);
     }
 
     protected HttpResponseOutputStream<R> write(final Path file, final TransferStatus status,
@@ -92,7 +94,13 @@ public abstract class AbstractHttpWriteFeature<R> extends AppendWriteFeature<R> 
             public void run() {
                 try {
                     status.validate();
-                    this.response = command.call(entity);
+                    if(status.getLength() != TransferStatus.UNKNOWN_LENGTH && PreferencesFactory.get().getInteger("http.request.entity.buffer.limit")
+                            > status.getLength()) {
+                        this.response = command.call(new BufferedHttpEntity(entity));
+                    }
+                    else {
+                        this.response = command.call(entity);
+                    }
                 }
                 catch(Exception e) {
                     this.exception = e;
@@ -109,9 +117,7 @@ public abstract class AbstractHttpWriteFeature<R> extends AppendWriteFeature<R> 
                 = new NamedThreadFactory(String.format("httpwriter-%s", file.getName()));
         final Thread t = factory.newThread(target);
         t.start();
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Wait for response of %s", command));
-        }
+        log.debug("Wait for response of {}", command);
         // Wait for output stream to become available
         Interruptibles.await(streamOpen, ConnectionCanceledException.class);
         if(null != target.getException()) {

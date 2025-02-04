@@ -56,6 +56,7 @@ public class B2ExceptionMappingService extends AbstractExceptionMappingService<B
 
     @Override
     public BackgroundException map(final B2ApiException e) {
+        log.warn("Map failure {}", e.toString());
         final StringBuilder buffer = new StringBuilder();
         this.append(buffer, e.getMessage());
         switch(e.getStatus()) {

@@ -70,6 +70,10 @@ public class LRUCache<Key, Value> {
         return build(null, maximumSize, -1L);
     }
 
+    public static <Key, Value> LRUCache<Key, Value> build(final long maximumSize, final long expireDuration) {
+        return build(null, maximumSize, expireDuration);
+    }
+
     public static <Key, Value> LRUCache<Key, Value> build(final RemovalListener<Key, Value> listener, final long maximumSize) {
         return build(listener, maximumSize, -1L);
     }
@@ -84,15 +88,20 @@ public class LRUCache<Key, Value> {
 
     private final Cache<Key, Value> delegate;
 
+    /**
+     * @param loader            Loading function
+     * @param listener          Removal listener
+     * @param maximumSize       Maximum cache size
+     * @param expireDuration    In milliseconds
+     * @param expireAfterAccess Expire cached value after accessing from cache. Expire after write only when false
+     */
     private LRUCache(final Function<Key, Value> loader, final RemovalListener<Key, Value> listener, final long maximumSize, final long expireDuration, boolean expireAfterAccess) {
         final CacheBuilder<Object, Object> builder = CacheBuilder.newBuilder();
         if(listener != null) {
             builder.removalListener(new RemovalListener<Key, Value>() {
                 @Override
                 public void onRemoval(final RemovalNotification<Key, Value> notification) {
-                    if(log.isDebugEnabled()) {
-                        log.debug(String.format("Removed %s from cache with cause %s", notification.getKey(), notification.getCause()));
-                    }
+                    log.debug("Removed {} from cache with cause {}", notification.getKey(), notification.getCause());
                     listener.onRemoval(notification);
                 }
             });
@@ -134,7 +143,7 @@ public class LRUCache<Key, Value> {
 
     public void put(final Key key, Value value) {
         if(null == key) {
-            log.warn(String.format("Discard caching %s=%s", key, value));
+            log.warn("Discard caching {}={}", key, value);
             return;
         }
         if(null == value) {

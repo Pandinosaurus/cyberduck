@@ -20,9 +20,9 @@ package ch.cyberduck.core.openstack;
 
 import ch.cyberduck.core.ConnectionCallback;
 import ch.cyberduck.core.DefaultPathContainerService;
+import ch.cyberduck.core.DefaultPathPredicate;
 import ch.cyberduck.core.Path;
 import ch.cyberduck.core.PathContainerService;
-import ch.cyberduck.core.SimplePathPredicate;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.features.Delete;
 import ch.cyberduck.core.features.Move;
@@ -30,6 +30,7 @@ import ch.cyberduck.core.io.DisabledStreamListener;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import java.util.Collections;
+import java.util.Optional;
 
 public class SwiftMoveFeature implements Move {
 
@@ -54,7 +55,7 @@ public class SwiftMoveFeature implements Move {
 
     @Override
     public Path move(final Path file, final Path renamed, final TransferStatus status, final Delete.Callback callback, final ConnectionCallback connectionCallback) throws BackgroundException {
-        if(new SimplePathPredicate(containerService.getContainer(file)).test(containerService.getContainer(renamed))) {
+        if(new DefaultPathPredicate(containerService.getContainer(file)).test(containerService.getContainer(renamed))) {
             // Either copy complete file contents (small file) or copy manifest (large file)
             final Path rename = proxy.copy(file, renamed, new TransferStatus().withLength(file.attributes().getSize()), connectionCallback, new DisabledStreamListener());
             delete.delete(Collections.singletonMap(file, status), connectionCallback, callback, false);
@@ -68,7 +69,7 @@ public class SwiftMoveFeature implements Move {
     }
 
     @Override
-    public void preflight(final Path source, final Path target) throws BackgroundException {
+    public void preflight(final Path source, final Optional<Path> target) throws BackgroundException {
         proxy.preflight(source, target);
         delete.preflight(source);
     }

@@ -23,6 +23,8 @@ import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.ConnectionCanceledException;
 import ch.cyberduck.core.exception.ConnectionRefusedException;
 import ch.cyberduck.core.exception.ConnectionTimeoutException;
+import ch.cyberduck.core.exception.LocalAccessDeniedException;
+import ch.cyberduck.core.exception.LocalNotfoundException;
 import ch.cyberduck.core.exception.LoginFailureException;
 import ch.cyberduck.core.exception.QuotaException;
 import ch.cyberduck.core.exception.ResolveFailedException;
@@ -49,9 +51,7 @@ public final class DefaultFailureDiagnostics implements FailureDiagnostics<Backg
 
     @Override
     public Type determine(final BackgroundException failure) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Determine cause for failure %s", failure));
-        }
+        log.debug("Determine cause for failure {}", failure.getMessage());
         for(Throwable cause : ExceptionUtils.getThrowableList(failure)) {
             if(failure instanceof UnsupportedException) {
                 return Type.unsupported;
@@ -101,6 +101,10 @@ public final class DefaultFailureDiagnostics implements FailureDiagnostics<Backg
             }
             if(cause instanceof AntiVirusAccessDeniedException) {
                 return Type.antivirus;
+            }
+            if(cause instanceof LocalAccessDeniedException
+                    || cause instanceof LocalNotfoundException) {
+                return Type.filesystem;
             }
         }
         return Type.application;

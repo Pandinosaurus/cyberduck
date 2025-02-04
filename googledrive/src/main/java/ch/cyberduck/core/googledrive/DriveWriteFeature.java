@@ -28,6 +28,7 @@ import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -37,7 +38,6 @@ import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpPatch;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.protocol.HTTP;
@@ -66,20 +66,15 @@ public class DriveWriteFeature extends AbstractHttpWriteFeature<File> implements
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
     public EnumSet<Flags> features(final Path file) {
-        return EnumSet.of(Flags.timestamp);
+        return EnumSet.of(Flags.timestamp, Flags.mime);
     }
 
     @Override
     public HttpResponseOutputStream<File> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final DelayedHttpEntityCallable<File> command = new DelayedHttpEntityCallable<File>(file) {
             @Override
-            public File call(final AbstractHttpEntity entity) throws BackgroundException {
+            public File call(final HttpEntity entity) throws BackgroundException {
                 try {
                     // Initiate a resumable upload
                     final HttpEntityEnclosingRequestBase request;
@@ -136,8 +131,8 @@ public class DriveWriteFeature extends AbstractHttpWriteFeature<File> implements
                                 }
                                 break;
                             default:
-                                throw new DefaultHttpResponseExceptionMappingService().map(
-                                        new HttpResponseException(postResponse.getStatusLine().getStatusCode(), postResponse.getStatusLine().getReasonPhrase()));
+                                throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
+                                        new HttpResponseException(postResponse.getStatusLine().getStatusCode(), postResponse.getStatusLine().getReasonPhrase()), file);
                         }
                     }
                     finally {
@@ -159,8 +154,8 @@ public class DriveWriteFeature extends AbstractHttpWriteFeature<File> implements
                                         fileid.cache(file, response.getId());
                                         return response;
                                     default:
-                                        throw new DefaultHttpResponseExceptionMappingService().map(
-                                                new HttpResponseException(putResponse.getStatusLine().getStatusCode(), putResponse.getStatusLine().getReasonPhrase()));
+                                        throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
+                                                new HttpResponseException(putResponse.getStatusLine().getStatusCode(), putResponse.getStatusLine().getReasonPhrase()), file);
                                 }
                             }
                             finally {
@@ -168,8 +163,8 @@ public class DriveWriteFeature extends AbstractHttpWriteFeature<File> implements
                             }
                         }
                         else {
-                            throw new DefaultHttpResponseExceptionMappingService().map(
-                                    new HttpResponseException(postResponse.getStatusLine().getStatusCode(), postResponse.getStatusLine().getReasonPhrase()));
+                            throw new DefaultHttpResponseExceptionMappingService().map("Upload {0} failed",
+                                    new HttpResponseException(postResponse.getStatusLine().getStatusCode(), postResponse.getStatusLine().getReasonPhrase()), file);
                         }
                     }
                     return null;

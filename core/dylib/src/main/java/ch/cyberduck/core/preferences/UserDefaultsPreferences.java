@@ -57,6 +57,7 @@ public class UserDefaultsPreferences extends DefaultPreferences {
 
     private static final String MISSING_PROPERTY = String.valueOf(StringUtils.INDEX_NOT_FOUND);
 
+    private final BundleApplicationResourcesFinder resources = new BundleApplicationResourcesFinder();
     private NSUserDefaults store;
 
     /**
@@ -70,13 +71,11 @@ public class UserDefaultsPreferences extends DefaultPreferences {
         // Lookup in the default map
         final String value = super.getDefault(property);
         if(null == value) {
-            final NSBundle bundle = new BundleApplicationResourcesFinder().bundle();
+            final NSBundle bundle = resources.bundle();
             // Missing in default. Lookup in Info.plist
             NSObject plist = bundle.infoDictionary().objectForKey(property);
             if(null == plist) {
-                if(log.isTraceEnabled()) {
-                    log.trace(String.format("No default value for property %s", property));
-                }
+                log.trace("No default value for property {}", property);
                 return null;
             }
             return plist.toString();
@@ -107,15 +106,13 @@ public class UserDefaultsPreferences extends DefaultPreferences {
         if(value.isKindOfClass(NSArray.CLASS)) {
             return StringUtils.join(this.toList(Rococoa.cast(value, NSArray.class)), LIST_SEPERATOR);
         }
-        log.warn(String.format("Unknown type for property %s", property));
+        log.warn("Unknown type for property {}", property);
         return value.toString();
     }
 
     @Override
     public void setProperty(final String property, final String value) {
-        if(log.isInfoEnabled()) {
-            log.info(String.format("Set property %s for key %s", value, property));
-        }
+        log.info("Set property {} for key {}", value, property);
         if(StringUtils.isNotEmpty(value)) {
             // Sets the value of the default identified by defaultName in the standard application domain.
             // Setting a default has no effect on the value returned by the objectForKey method if
@@ -144,9 +141,7 @@ public class UserDefaultsPreferences extends DefaultPreferences {
 
     @Override
     public void deleteProperty(final String property) {
-        if(log.isDebugEnabled()) {
-            log.debug(String.format("Delete property %s", property));
-        }
+        log.debug("Delete property {}", property);
         store.removeObjectForKey(property);
         cache.remove(property);
     }
@@ -169,7 +164,7 @@ public class UserDefaultsPreferences extends DefaultPreferences {
             this.setDefault("local.user.home", SystemB.INSTANCE.getpwuid(LibC.INSTANCE.getuid()).pw_dir);
         }
 
-        final NSBundle bundle = new BundleApplicationResourcesFinder().bundle();
+        final NSBundle bundle = resources.bundle();
         if(null != bundle) {
             if(bundle.objectForInfoDictionaryKey("CFBundleName") != null) {
                 this.setDefault("application.name", bundle.objectForInfoDictionaryKey("CFBundleName").toString());
@@ -187,7 +182,7 @@ public class UserDefaultsPreferences extends DefaultPreferences {
                     this.setDefault("tmp.dir", directory.getAbsolute());
                 }
                 catch(AccessDeniedException e) {
-                    log.warn(String.format("Failure creating temporary directory %s", directory));
+                    log.warn("Failure creating temporary directory {}", directory);
                 }
             }
             if(bundle.objectForInfoDictionaryKey("CFBundleShortVersionString") != null) {
@@ -199,7 +194,7 @@ public class UserDefaultsPreferences extends DefaultPreferences {
             this.setDefault("application.receipt.path", String.format("%s/Contents/_MASReceipt", bundle.bundlePath()));
         }
         this.setDefault("oauth.handler.scheme",
-            String.format("x-%s-action", StringUtils.deleteWhitespace(StringUtils.lowerCase(this.getProperty("application.name")))));
+                String.format("x-%s-action", StringUtils.deleteWhitespace(StringUtils.lowerCase(this.getProperty("application.name")))));
 
         this.setDefault("update.feed.release", "https://version.cyberduck.io/changelog.rss");
         this.setDefault("update.feed.beta", "https://version.cyberduck.io/beta/changelog.rss");
@@ -231,12 +226,12 @@ public class UserDefaultsPreferences extends DefaultPreferences {
         this.setDefault("queue.window.tabbing.identifier", "browser.window.tabbing.identifier");
 
         this.setDefault("terminal.command.iterm2", "set t to (create window with default profile)\n" +
-            "tell t\n" +
-            "set s to (current session)\n" +
-            "tell s\n" +
-            "write text \"{0}\"\n" +
-            "end tell\n" +
-            "end tell");
+                "tell t\n" +
+                "set s to (current session)\n" +
+                "tell s\n" +
+                "write text \"{0}\"\n" +
+                "end tell\n" +
+                "end tell");
         this.setDefault("terminal.command.default", "do script \"{0}\"");
 
         // Workaround for #11508
@@ -272,7 +267,7 @@ public class UserDefaultsPreferences extends DefaultPreferences {
 
     @Override
     public List<String> applicationLocales() {
-        final NSBundle bundle = new BundleApplicationResourcesFinder().bundle();
+        final NSBundle bundle = resources.bundle();
         return this.toList(bundle.localizations());
     }
 

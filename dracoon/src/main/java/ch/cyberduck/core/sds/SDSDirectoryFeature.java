@@ -23,7 +23,6 @@ import ch.cyberduck.core.exception.AccessDeniedException;
 import ch.cyberduck.core.exception.BackgroundException;
 import ch.cyberduck.core.exception.InvalidFilenameException;
 import ch.cyberduck.core.features.Directory;
-import ch.cyberduck.core.features.Write;
 import ch.cyberduck.core.preferences.HostPreferences;
 import ch.cyberduck.core.sds.io.swagger.client.ApiException;
 import ch.cyberduck.core.sds.io.swagger.client.api.NodesApi;
@@ -70,10 +69,9 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
     }
 
     private Path createFolder(final Path folder) throws BackgroundException, ApiException {
-        final CreateFolderRequest folderRequest = new CreateFolderRequest();
-        folderRequest.setParentId(Long.parseLong(nodeid.getVersionId(folder.getParent())));
-        folderRequest.setName(folder.getName());
-        final Node node = new NodesApi(session.getClient()).createFolder(folderRequest, StringUtils.EMPTY, null);
+        final Node node = nodeid.retry(folder.getParent(), () -> new NodesApi(session.getClient()).createFolder(new CreateFolderRequest()
+                .parentId(Long.parseLong(nodeid.getVersionId(folder.getParent())))
+                .name(folder.getName()), StringUtils.EMPTY, null));
         nodeid.cache(folder, String.valueOf(node.getId()));
         return folder.withAttributes(new SDSAttributesAdapter(session).toAttributes(node));
     }
@@ -108,7 +106,7 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
     public void preflight(final Path workdir, final String filename) throws BackgroundException {
         if(workdir.isRoot()) {
             if(!new HostPreferences(session.getHost()).getBoolean("sds.create.dataroom.enable")) {
-                log.warn(String.format("Disallow creating new top level data room %s", filename));
+                log.warn("Disallow creating new top level data room {}", filename);
                 throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename)).withFile(workdir);
             }
         }
@@ -119,10 +117,5 @@ public class SDSDirectoryFeature implements Directory<VersionId> {
         if(!permissions.containsRole(workdir, SDSPermissionsFeature.CREATE_ROLE)) {
             throw new AccessDeniedException(MessageFormat.format(LocaleFactory.localizedString("Cannot create folder {0}", "Error"), filename)).withFile(workdir);
         }
-    }
-
-    @Override
-    public Directory<VersionId> withWriter(final Write<VersionId> writer) {
-        return this;
     }
 }

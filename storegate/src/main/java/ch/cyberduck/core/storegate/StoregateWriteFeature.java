@@ -32,6 +32,7 @@ import ch.cyberduck.core.storegate.io.swagger.client.model.FileMetadata;
 import ch.cyberduck.core.transfer.TransferStatus;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.http.HttpEntity;
 import org.apache.http.HttpHeaders;
 import org.apache.http.HttpResponse;
 import org.apache.http.HttpStatus;
@@ -40,7 +41,6 @@ import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpEntityEnclosingRequestBase;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.AbstractHttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.protocol.HTTP;
@@ -70,11 +70,6 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
     }
 
     @Override
-    public Append append(final Path file, final TransferStatus status) throws BackgroundException {
-        return new Append(false).withStatus(status);
-    }
-
-    @Override
     public EnumSet<Flags> features(final Path file) {
         return EnumSet.of(Flags.timestamp);
     }
@@ -83,7 +78,7 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
     public HttpResponseOutputStream<File> write(final Path file, final TransferStatus status, final ConnectionCallback callback) throws BackgroundException {
         final DelayedHttpEntityCallable<File> command = new DelayedHttpEntityCallable<File>(file) {
             @Override
-            public File call(final AbstractHttpEntity entity) throws BackgroundException {
+            public File call(final HttpEntity entity) throws BackgroundException {
                 // Initiate a resumable upload
                 String location;
                 try {
@@ -121,8 +116,9 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
                                 fileid.cache(file, result.getId());
                                 return result;
                             default:
-                                throw new StoregateExceptionMappingService(fileid).map(new ApiException(putResponse.getStatusLine().getStatusCode(), putResponse.getStatusLine().getReasonPhrase(), Collections.emptyMap(),
-                                        EntityUtils.toString(putResponse.getEntity())));
+                                throw new StoregateExceptionMappingService(fileid).map("Upload {0} failed",
+                                        new ApiException(putResponse.getStatusLine().getStatusCode(), putResponse.getStatusLine().getReasonPhrase(), Collections.emptyMap(),
+                                                EntityUtils.toString(putResponse.getEntity())), file);
                         }
                     }
                     catch(BackgroundException e) {
@@ -167,7 +163,7 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
             }
             meta.setFileName(URIEncoder.encode(file.getName()));
             meta.setParentId(fileid.getFileId(file.getParent()));
-            meta.setFileSize(status.getLength() > 0 ? status.getLength() : null);
+            meta.setFileSize(TransferStatus.UNKNOWN_LENGTH != status.getLength() ? status.getLength() : null);
             if(null != status.getModified()) {
                 meta.setModified(new DateTime(status.getModified()));
             }
@@ -183,8 +179,9 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
                     case HttpStatus.SC_OK:
                         break;
                     default:
-                        throw new StoregateExceptionMappingService(fileid).map(new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase(), Collections.emptyMap(),
-                                EntityUtils.toString(response.getEntity())));
+                        throw new StoregateExceptionMappingService(fileid).map("Upload {0} failed",
+                                new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase(), Collections.emptyMap(),
+                                        EntityUtils.toString(response.getEntity())), file);
                 }
             }
             finally {
@@ -193,8 +190,9 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
             if(response.containsHeader(HttpHeaders.LOCATION)) {
                 return response.getFirstHeader(HttpHeaders.LOCATION).getValue();
             }
-            throw new StoregateExceptionMappingService(fileid).map(new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase(), Collections.emptyMap(),
-                    EntityUtils.toString(response.getEntity())));
+            throw new StoregateExceptionMappingService(fileid).map("Upload {0} failed",
+                    new ApiException(response.getStatusLine().getStatusCode(), response.getStatusLine().getReasonPhrase(), Collections.emptyMap(),
+                            EntityUtils.toString(response.getEntity())), file);
         }
         catch(IOException e) {
             throw new HttpExceptionMappingService().map("Upload {0} failed", e, file);
@@ -202,7 +200,7 @@ public class StoregateWriteFeature extends AbstractHttpWriteFeature<File> {
     }
 
     protected void cancel(final Path file, final String location) throws BackgroundException {
-        log.warn(String.format("Cancel failed upload %s for %s", location, file));
+        log.warn("Cancel failed upload {} for {}", location, file);
         try {
             final HttpDelete delete = new HttpDelete(location);
             session.getClient().getClient().execute(delete);

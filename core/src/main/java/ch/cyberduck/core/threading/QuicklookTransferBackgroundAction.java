@@ -35,6 +35,7 @@ import ch.cyberduck.core.transfer.TransferAction;
 import ch.cyberduck.core.transfer.TransferCallback;
 import ch.cyberduck.core.transfer.TransferItem;
 import ch.cyberduck.core.transfer.TransferPrompt;
+import ch.cyberduck.core.transfer.TransferQueue;
 import ch.cyberduck.core.transfer.download.AbstractDownloadFilter;
 import ch.cyberduck.core.transfer.download.CompareFilter;
 import ch.cyberduck.core.transfer.download.DownloadFilterOptions;
@@ -49,8 +50,9 @@ public class QuicklookTransferBackgroundAction extends BrowserTransferBackground
     private final QuickLook quicklook;
     private final List<TransferItem> downloads;
 
-    public QuicklookTransferBackgroundAction(final Controller controller, final QuickLook quicklook, final SessionPool session, final List<TransferItem> items) {
-        super(controller, session, toDownload(session, items), new TransferCallback() {
+    public QuicklookTransferBackgroundAction(final Controller controller, final QuickLook quicklook, final SessionPool session,
+                                             final TransferQueue queue, final List<TransferItem> items) {
+        super(controller, session, queue, toDownload(session, items), new TransferCallback() {
             @Override
             public void complete(final Transfer transfer) {
                 //
@@ -88,7 +90,17 @@ public class QuicklookTransferBackgroundAction extends BrowserTransferBackground
             public AbstractDownloadFilter filter(final Session<?> source, final Session<?> destination, final TransferAction action, final ProgressListener listener) {
                 final DownloadFilterOptions options = new DownloadFilterOptions(session.getHost());
                 options.segments = false;
-                return new CompareFilter(new DisabledDownloadSymlinkResolver(), source, options, listener, new DefaultComparePathFilter(source) {
+                return new CompareFilter(new DisabledDownloadSymlinkResolver(), source, new Find() {
+                    @Override
+                    public boolean find(final Path file, final ListProgressListener listener) {
+                        return true;
+                    }
+                }, new AttributesFinder() {
+                    @Override
+                    public PathAttributes find(final Path file, final ListProgressListener listener) {
+                        return file.attributes();
+                    }
+                }, new DefaultComparePathFilter(source) {
                     @Override
                     public Comparison compare(final Path file, final Local local, final ProgressListener listener) throws BackgroundException {
                         switch(super.compare(file, local, listener)) {
@@ -98,25 +110,15 @@ public class QuicklookTransferBackgroundAction extends BrowserTransferBackground
                         // Comparison may return local when no checksum to compare is avavailable
                         return Comparison.remote;
                     }
-                }).withFinder(new Find() {
-                    @Override
-                    public boolean find(final Path file, final ListProgressListener listener) {
-                        return true;
-                    }
-                }).withAttributes(new AttributesFinder() {
-                    @Override
-                    public PathAttributes find(final Path file, final ListProgressListener listener) {
-                        return file.attributes();
-                    }
-                });
+                }, options);
             }
         };
     }
 
     @Override
-    public void cleanup() {
-        super.cleanup();
-        if(!this.hasFailed()) {
+    public void cleanup(final Boolean result, final BackgroundException failure) {
+        super.cleanup(result, failure);
+        if(failure != null) {
             final List<Local> previews = new ArrayList<>();
             for(TransferItem download : downloads) {
                 previews.add(download.local);

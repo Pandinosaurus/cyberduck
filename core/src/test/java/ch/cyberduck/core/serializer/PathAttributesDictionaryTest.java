@@ -23,9 +23,7 @@ import ch.cyberduck.core.io.Checksum;
 
 import org.junit.Test;
 
-import java.net.URI;
-
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 
 public class PathAttributesDictionaryTest {
 
@@ -34,6 +32,8 @@ public class PathAttributesDictionaryTest {
         PathAttributes attributes = new PathAttributes();
         attributes.setOwner("u");
         attributes.setGroup("g");
+        attributes.setTrashed(true);
+        attributes.setHidden(true);
         attributes.setModificationDate(System.currentTimeMillis());
         attributes.setPermission(new Permission(Permission.Action.none, Permission.Action.write, Permission.Action.execute));
         PathAttributes clone = new PathAttributesDictionary<>().deserialize(attributes.serialize(SerializerFactory.get()));
@@ -41,6 +41,9 @@ public class PathAttributesDictionaryTest {
         assertEquals(clone.getModificationDate(), attributes.getModificationDate());
         assertEquals("u", clone.getOwner());
         assertEquals("g", clone.getGroup());
+        assertTrue(clone.isHidden());
+        assertTrue(clone.isTrashed());
+        assertFalse(clone.isDuplicate());
     }
 
     @Test
@@ -49,7 +52,7 @@ public class PathAttributesDictionaryTest {
         attributes.setSize(3L);
         attributes.setChecksum(Checksum.parse("da39a3ee5e6b4b0d3255bfef95601890afd80709"));
         attributes.setModificationDate(5343L);
-        attributes.setLink(new DescriptiveUrl(URI.create("https://cyberduck.io/"), DescriptiveUrl.Type.signed));
+        attributes.setLink(new DescriptiveUrl("https://cyberduck.io/", DescriptiveUrl.Type.signed));
         final PathAttributes deserialized = new PathAttributesDictionary<>().deserialize(attributes.serialize(SerializerFactory.get()));
         assertEquals(attributes, deserialized);
         assertEquals(attributes.hashCode(), deserialized.hashCode());
